@@ -16,7 +16,7 @@ dp = Dispatcher()
 genai.configure(api_key=GEMINI_KEY)
 
 # Обновляем до актуальной версии модели, если применимо
-model = genai.GenerativeModel("gemini-2.5-flash") 
+model = genai.GenerativeModel("gemini-3.6-flash") 
 
 # Локальное хранилище для истории сообщений группы {chat_id: [list_of_messages]}
 MAX_HISTORY = 40
