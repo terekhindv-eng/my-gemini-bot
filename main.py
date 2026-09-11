@@ -8,25 +8,32 @@ from aiohttp import web
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-GROUP_ID = int(os.getenv("TELEGRAM_GROUP_ID", "0"))
 PORT = int(os.getenv("PORT", "10000"))
+
+# Считываем список ID групп из переменной окружения (через запятую)
+raw_groups = os.getenv("TELEGRAM_GROUP_ID", "0")
+ALLOWED_GROUPS = [int(gid.strip()) for gid in raw_groups.split(",") if gid.strip()]
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 genai.configure(api_key=GEMINI_KEY)
 
-# Обновляем до актуальной версии модели, если применимо
-model = genai.GenerativeModel("gemini-3.6-flash") 
+# Используем актуальную и стабильную модель gemini-3.6-flash
+model = genai.GenerativeModel("gemini-3.6-flash")
 
-# Локальное хранилище для истории сообщений группы {chat_id: [list_of_messages]}
+# Локальное хранилище историй раздельно для КАЖДОЙ группы {chat_id: [список_сообщений]}
 MAX_HISTORY = 40
 chat_histories = defaultdict(list)
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
-    # Защита: не даем запускать команду в чужих группах
-    if message.chat.type in ["group", "supergroup"] and message.chat.id != GROUP_ID:
-        await bot.leave_chat(message.chat.id)
+    # Защита: если команду вызвали в чужой группе
+    if message.chat.type in ["group", "supergroup"] and message.chat.id not in ALLOWED_GROUPS:
+        try:
+            await message.answer("❌ Этот бот приватный и не может работать в данной группе.")
+            await bot.leave_chat(message.chat.id)
+        except Exception:
+            pass
         return
         
     await message.answer("Привет! Я готов к живому человеческому общению без лишних символов.")
@@ -35,37 +42,37 @@ async def start_cmd(message: types.Message):
 async def handle_message(message: types.Message):
     bot_info = await bot.get_me()
     bot_username = f"@{bot_info.username}"
+    current_chat_id = message.chat.id
 
-    # ================= ЗАЩИТНЫЙ БЛОК НАЧАЛО =================
-    # Если бот запущен в группе/супергруппе, и это НЕ ваша разрешенная группа
-    if message.chat.type in ["group", "supergroup"] and message.chat.id != GROUP_ID:
+    # ================= БЛОК ЗАЩИТЫ ОТ ЧУЖИХ ГРУПП =================
+    if message.chat.type in ["group", "supergroup"] and current_chat_id not in ALLOWED_GROUPS:
         try:
-            # Вежливо предупреждаем и выходим из чужого чата
             await message.answer("❌ Этот бот приватный и не может работать в данной группе.")
-            await bot.leave_chat(message.chat.id)
+            await bot.leave_chat(current_chat_id)
         except Exception:
-            pass # Если у бота нет прав писать сообщения, просто игнорируем ошибку
+            pass
         return
-    # ================= ЗАЩИТНЫЙ БЛОК КОНЕЦ =================
+    # ==============================================================
 
-    # 1. Записываем текущее сообщение в историю
-    if message.chat.id == GROUP_ID and message.text and bot_username not in message.text:
+    # 1. Записываем текущее сообщение в историю (только для разрешенных групп)
+    if message.chat.type in ["group", "supergroup"] and message.text and bot_username not in message.text:
         user_name = message.from_user.full_name or "Пользователь"
-        chat_histories[GROUP_ID].append(f"{user_name}: {message.text}")
-        if len(chat_histories[GROUP_ID]) > MAX_HISTORY:
-            chat_histories[GROUP_ID].pop(0)
+        chat_histories[current_chat_id].append(f"{user_name}: {message.text}")
+        if len(chat_histories[current_chat_id]) > MAX_HISTORY:
+            chat_histories[current_chat_id].pop(0)
 
-    # 2. Проверяем обращение к боту
+    # 2. Проверяем, обратился ли кто-то к боту
     is_mentioned = message.text and bot_username in message.text
     is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id
 
-    if message.chat.type == "private" or (message.chat.id == GROUP_ID and (is_mentioned or is_reply_to_bot)):
+    # Бот реагирует, если это ЛС или если это разрешенная группа + упомянули/ответили боту
+    if message.chat.type == "private" or (current_chat_id in ALLOWED_GROUPS and (is_mentioned or is_reply_to_bot)):
         try:
             clean_request = message.text.replace(bot_username, "").strip() if message.text else ""
             if not clean_request and is_reply_to_bot:
                 clean_request = message.text
 
-            # Инструкция для ведения живого диалога
+            # Правило стиля для Gemini
             style_instruction = (
                 "\n\nПРАВИЛО СТИЛЯ И ОФОРМЛЕНИЯ:\n"
                 "Отвечай как живой человек в обычном текстовом чате или мессенджере. "
@@ -74,9 +81,9 @@ async def handle_message(message: types.Message):
                 "Не делай маркированных или нумерованных списков. Твой ответ должен выглядеть как естественная реплика в диалоге."
             )
 
-            # Формируем итоговый промпт
-            if message.chat.type != "private" and chat_histories[GROUP_ID]:
-                context = "\n".join(chat_histories[GROUP_ID])
+            # Формируем промпт с контекстом конкретно ЭТОЙ группы
+            if message.chat.type != "private" and chat_histories[current_chat_id]:
+                context = "\n".join(chat_histories[current_chat_id])
                 full_prompt = (
                     f"Перед тобой история последних сообщений из рабочего чата:\n"
                     f"\"\"\"\n{context}\n\"\"\"\n\n"
