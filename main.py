@@ -14,7 +14,9 @@ PORT = int(os.getenv("PORT", "10000"))
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel("gemini-3.6-flash")
+
+# Обновляем до актуальной версии модели, если применимо
+model = genai.GenerativeModel("gemini-2.5-flash") 
 
 # Локальное хранилище для истории сообщений группы {chat_id: [list_of_messages]}
 MAX_HISTORY = 40
@@ -22,12 +24,29 @@ chat_histories = defaultdict(list)
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
+    # Защита: не даем запускать команду в чужих группах
+    if message.chat.type in ["group", "supergroup"] and message.chat.id != GROUP_ID:
+        await bot.leave_chat(message.chat.id)
+        return
+        
     await message.answer("Привет! Я готов к живому человеческому общению без лишних символов.")
 
 @dp.message()
 async def handle_message(message: types.Message):
     bot_info = await bot.get_me()
     bot_username = f"@{bot_info.username}"
+
+    # ================= ЗАЩИТНЫЙ БЛОК НАЧАЛО =================
+    # Если бот запущен в группе/супергруппе, и это НЕ ваша разрешенная группа
+    if message.chat.type in ["group", "supergroup"] and message.chat.id != GROUP_ID:
+        try:
+            # Вежливо предупреждаем и выходим из чужого чата
+            await message.answer("❌ Этот бот приватный и не может работать в данной группе.")
+            await bot.leave_chat(message.chat.id)
+        except Exception:
+            pass # Если у бота нет прав писать сообщения, просто игнорируем ошибку
+        return
+    # ================= ЗАЩИТНЫЙ БЛОК КОНЕЦ =================
 
     # 1. Записываем текущее сообщение в историю
     if message.chat.id == GROUP_ID and message.text and bot_username not in message.text:
