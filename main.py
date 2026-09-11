@@ -5,7 +5,6 @@ from aiogram.filters import CommandStart
 import google.generativeai as genai
 from aiohttp import web
 
-# Переменные
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 GROUP_ID = int(os.getenv("TELEGRAM_GROUP_ID", "0"))
@@ -22,19 +21,32 @@ async def start_cmd(message: types.Message):
 
 @dp.message()
 async def handle_message(message: types.Message):
-    if message.chat.type == "private" or message.chat.id == GROUP_ID:
+    # Получаем юзернейм бота, чтобы искать его в тексте
+    bot_info = await bot.get_me()
+    bot_username = f"@{bot_info.username}"
+
+    # Проверяем, обратились ли к боту
+    is_mentioned = message.text and bot_username in message.text
+    is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id
+
+    # В личке отвечаем всегда. В группе — только если тегнули или ответили на его сообщение
+    if message.chat.type == "private" or (message.chat.id == GROUP_ID and (is_mentioned or is_reply_to_bot)):
         try:
-            response = model.generate_content(message.text)
+            # Очищаем текст вопроса от юзернейма бота, чтобы не путать нейросеть
+            clean_text = message.text.replace(bot_username, "").strip() if message.text else ""
+            
+            if not clean_text and is_reply_to_bot:
+                clean_text = message.text  # Если просто ответили на сообщение бота текстом
+
+            response = model.generate_content(clean_text)
             await message.reply(response.text)
         except Exception as e:
             await message.reply(f"Ошибка Gemini API: {str(e)}")
 
-# Заглушка веб-сервера для Render
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
 async def main():
-    # Запуск веб-сервера на порту Render
     app = web.Application()
     app.router.add_get("/", handle_ping)
     runner = web.AppRunner(app)
