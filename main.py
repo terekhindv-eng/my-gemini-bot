@@ -25,6 +25,10 @@ model = genai.GenerativeModel("gemini-3.6-flash")
 MAX_HISTORY = 40
 chat_histories = defaultdict(list)
 
+# Глобальные переменные для хранения данных бота (получаем один раз при старте)
+BOT_USERNAME = ""
+BOT_ID = 0
+
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
     # Защита: если команду вызвали в чужой группе
@@ -40,8 +44,7 @@ async def start_cmd(message: types.Message):
 
 @dp.message()
 async def handle_message(message: types.Message):
-    bot_info = await bot.get_me()
-    bot_username = f"@{bot_info.username}"
+    global BOT_USERNAME, BOT_ID
     current_chat_id = message.chat.id
 
     # ================= БЛОК ЗАЩИТЫ ОТ ЧУЖИХ ГРУПП =================
@@ -55,20 +58,20 @@ async def handle_message(message: types.Message):
     # ==============================================================
 
     # 1. Записываем текущее сообщение в историю (только для разрешенных групп)
-    if message.chat.type in ["group", "supergroup"] and message.text and bot_username not in message.text:
+    if message.chat.type in ["group", "supergroup"] and message.text and BOT_USERNAME not in message.text:
         user_name = message.from_user.full_name or "Пользователь"
         chat_histories[current_chat_id].append(f"{user_name}: {message.text}")
         if len(chat_histories[current_chat_id]) > MAX_HISTORY:
             chat_histories[current_chat_id].pop(0)
 
-    # 2. Проверяем, обратился ли кто-то к боту
-    is_mentioned = message.text and bot_username in message.text
-    is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id
+    # 2. Проверяем, обратился ли кто-то к боту (используем сохраненные при старте данные)
+    is_mentioned = message.text and BOT_USERNAME in message.text
+    is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID
 
     # Бот реагирует, если это ЛС или если это разрешенная группа + упомянули/ответили боту
     if message.chat.type == "private" or (current_chat_id in ALLOWED_GROUPS and (is_mentioned or is_reply_to_bot)):
         try:
-            clean_request = message.text.replace(bot_username, "").strip() if message.text else ""
+            clean_request = message.text.replace(BOT_USERNAME, "").strip() if message.text else ""
             if not clean_request and is_reply_to_bot:
                 clean_request = message.text
 
@@ -103,6 +106,14 @@ async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
 async def main():
+    global BOT_USERNAME, BOT_ID
+    
+    # Получаем данные бота ОДИН раз при запуске скрипта, а не при каждом сообщении
+    bot_info = await bot.get_me()
+    BOT_USERNAME = f"@{bot_info.username}"
+    BOT_ID = bot_info.id
+    print(f"Бот {BOT_USERNAME} успешно запущен!")
+
     app = web.Application()
     app.router.add_get("/", handle_ping)
     runner = web.AppRunner(app)
