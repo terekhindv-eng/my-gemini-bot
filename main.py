@@ -14,7 +14,7 @@ PORT = int(os.getenv("PORT", "10000"))
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel("gemini-2.5-flash")
+model = genai.GenerativeModel("gemini-3.6-flash")
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
