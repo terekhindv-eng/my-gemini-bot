@@ -7,14 +7,11 @@ from aiogram.filters import CommandStart, Command
 from aiogram.enums import ParseMode
 from google import genai
 from google.genai import types as genai_types
+from aiohttp import web
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-
-try:
-    ALLOWED_GROUP = int(os.getenv("TELEGRAM_GROUP_ID", "0").strip())
-except ValueError:
-    ALLOWED_GROUP = 0
+PORT = int(os.getenv("PORT", "10000"))
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -47,9 +44,8 @@ async def start_cmd(message: types.Message):
     if message.chat.type == "private" and message.from_user.id != 490524856:
         await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
         return
-    if message.chat.type in ["group", "supergroup"] and message.chat.id != ALLOWED_GROUP:
+    if message.chat.type in ["group", "supergroup"] and message.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()):
         try:
-            await message.answer("❌ Этот бот приватный и не может работать в данной группе.")
             await bot.leave_chat(message.chat.id)
         except Exception:
             pass
@@ -60,13 +56,8 @@ async def start_cmd(message: types.Message):
 async def generate_image_cmd(message: types.Message):
     current_chat_id = message.chat.id
     if message.chat.type == "private" and message.from_user.id != 490524856:
-        await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
         return
-    if message.chat.type in ["group", "supergroup"] and current_chat_id != ALLOWED_GROUP:
-        try:
-            await bot.leave_chat(current_chat_id)
-        except Exception:
-            pass
+    if message.chat.type in ["group", "supergroup"] and message.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()):
         return
 
     image_prompt = message.get_args()
@@ -109,13 +100,8 @@ async def handle_files(message: types.Message):
     global BOT_USERNAME, BOT_ID
     current_chat_id = message.chat.id
     if message.chat.type == "private" and message.from_user.id != 490524856:
-        await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
         return
-    if message.chat.type in ["group", "supergroup"] and current_chat_id != ALLOWED_GROUP:
-        try:
-            await bot.leave_chat(current_chat_id)
-        except Exception:
-            pass
+    if message.chat.type in ["group", "supergroup"] and message.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()):
         return
 
     user_text = message.caption if message.caption else ""
@@ -167,13 +153,8 @@ async def handle_message(message: types.Message):
     global BOT_USERNAME, BOT_ID
     current_chat_id = message.chat.id
     if message.chat.type == "private" and message.from_user.id != 490524856:
-        await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
         return
-    if message.chat.type in ["group", "supergroup"] and current_chat_id != ALLOWED_GROUP:
-        try:
-            await bot.leave_chat(current_chat_id)
-        except Exception:
-            pass
+    if message.chat.type in ["group", "supergroup"] and message.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()):
         return
 
     thread_id = message.message_thread_id or 0
@@ -184,7 +165,7 @@ async def handle_message(message: types.Message):
         if len(chat_history[thread_id]) > MAX_HISTORY:
             chat_history[thread_id].pop(0)
 
-    if (message.chat.type == "private" and message.from_user.id == 490524856) or current_chat_id == ALLOWED_GROUP:
+    if (message.chat.type == "private" and message.from_user.id == 490524856) or message.chat.type in ["group", "supergroup"]:
         clean_request = message.text.replace(BOT_USERNAME, "").strip() if message.text else ""
         if not clean_request:
             clean_request = message.text
@@ -212,14 +193,25 @@ async def send_to_gemini(message: types.Message, contents: list):
     except Exception as e:
         await message.reply(f"Ошибка Gemini API: {str(e)}")
 
+async def handle_ping(request):
+    return web.Response(text="Bot is running!")
+
 async def main():
     global BOT_USERNAME, BOT_ID
     bot_info = await bot.get_me()
     BOT_USERNAME = f"@{bot_info.username}"
     BOT_ID = bot_info.id
     
-    # Сбрасываем все старые вебхуки для активации стабильного поллинга
     await bot.delete_webhook(drop_pending_updates=True)
+    
+    # Запуск параллельного легковесного веб-сервера для мгновенного ответа хостингу Render
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    
     print(f"Бот {BOT_USERNAME} успешно запущен!")
     await dp.start_polling(bot)
 
