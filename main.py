@@ -14,29 +14,23 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
 
-# Ссылка на ваш сервер Render (БЕЗ косой черты на конце)
 WEBHOOK_HOST = "https://onrender.com"
 WEBHOOK_PATH = f"/webhook/{TOKEN}"
 
-# 1. Настройка разрешенной группы
 try:
     ALLOWED_GROUP = int(os.getenv("TELEGRAM_GROUP_ID", "0").strip())
 except ValueError:
     ALLOWED_GROUP = 0
 
-# 2. Белый список пользователей для личной переписки
 ALLOWED_USERS = [490524856]  # ОБЯЗАТЕЛЬНО вставьте ваш числовой Telegram ID внутрь скобок!
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
-
-# Инициализируем новый официальный клиент Gemini
 ai_client = genai.Client(api_key=GEMINI_KEY)
 
-# Стилистика общения Google AI + жесткое требование использовать HTML-теги для форматирования
 GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "Вы — официальный ИИ-ассистент Gemini от Google. Ваши ответы должны полностью "
-    "соответствовать стилитике веб-интерфейса Google AI: будьте максимально полезным, "
+    "соответствовать стилистике веб-интерфейса Google AI: будьте максимально полезным, "
     "конкретным, технологичным и точным. Избегайте пространных вступлений и дежурных фраз.\n\n"
     "ПРАВИЛО ФОРМАТИРОВАНИЯ: Тебе КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать символы звездочек (*) "
     "или нижних подчеркиваний (_) для выделения текста. Если тебе нужно сделать текст "
@@ -45,17 +39,14 @@ GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "и перенос строки. Пишите в профессиональном, но дружелюбном тоне."
 )
 
-# Настройка конфигурации для текстовой модели
 TEXT_CONFIG = genai_types.GenerateContentConfig(
     system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION,
     temperature=0.7
 )
 
-# Локальное хранилище истории, разделенное по ID тем (топиков). Установлен лимит в 50 сообщений.
 MAX_HISTORY = 50
 chat_history = defaultdict(list)
 
-# Глобальные переменные данных бота
 BOT_USERNAME = ""
 BOT_ID = 0
 
@@ -64,7 +55,6 @@ async def start_cmd(message: types.Message):
     if message.chat.type == "private" and message.from_user.id not in ALLOWED_USERS:
         await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
         return
-
     if message.chat.type in ["group", "supergroup"] and message.chat.id != ALLOWED_GROUP:
         try:
             await message.answer("❌ Этот бот приватный и не может работать в данной группе.")
@@ -72,19 +62,14 @@ async def start_cmd(message: types.Message):
         except Exception:
             pass
         return
-        
     await message.answer("Привет! Я официальный ассистент Gemini. Чем могу помочь?")
 
-
-# Хэндлер для генерации изображений по команде /draw или /рендери
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message):
     current_chat_id = message.chat.id
-
     if message.chat.type == "private" and message.from_user.id not in ALLOWED_USERS:
         await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
         return
-
     if message.chat.type in ["group", "supergroup"] and current_chat_id != ALLOWED_GROUP:
         try:
             await bot.leave_chat(current_chat_id)
@@ -93,61 +78,43 @@ async def generate_image_cmd(message: types.Message):
         return
 
     image_prompt = message.text.split(maxsplit=1).strip() if len(message.text.split()) > 1 else ""
-
     if not image_prompt:
-        await message.reply("❌ <b>Вы не ввели описание для картинки!</b>\nПример использования:\n<code>/draw милый рыжий кот в очках космического скафандра</code>", parse_mode=ParseMode.HTML)
+        await message.reply("❌ <b>Вы не ввели описание для картинки!</b>\nПример использования:\n<code>/draw космический город</code>", parse_mode=ParseMode.HTML)
         return
 
     status_msg = await message.reply("🎨 <i>Генерирую изображение по вашему запросу, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
 
-    for attempt in range(3):
-        try:
-            result = ai_client.models.generate_images(
-                model='imagen-3.0-generate-002',
-                prompt=image_prompt,
-                config=genai_types.GenerateImagesConfig(
-                    number_of_images=1,
-                    output_mime_type="image/jpeg",
-                    aspect_ratio="1:1"
-                )
+    try:
+        result = ai_client.models.generate_images(
+            model='imagen-3.0-generate-002',
+            prompt=image_prompt,
+            config=genai_types.GenerateImagesConfig(
+                number_of_images=1,
+                output_mime_type="image/jpeg",
+                aspect_ratio="1:1"
             )
+        )
+        image_bytes = None
+        if result.generated_images:
+            image_bytes = result.generated_images.image.image_bytes
 
-            image_bytes = None
-            if result.generated_images:
-                image_bytes = result.generated_images.image.image_bytes
-
-            if not image_bytes:
-                await status_msg.edit_text("🔄 Извините, не удалось извлечь изображение из ответа ИИ. Попробуйте изменить формулировку промпта.")
-                return
-
-            input_file = types.BufferedInputFile(image_bytes, filename="generated_image.jpg")
-            await bot.delete_message(chat_id=current_chat_id, message_id=status_msg.message_id)
-            await message.reply_photo(photo=input_file, caption=f"✨ Готово! Изображение по запросу: <i>{image_prompt}</i>", parse_mode=ParseMode.HTML)
+        if not image_bytes:
+            await status_msg.edit_text("🔄 Не удалось сгенерировать картинку. Попробуйте другой запрос.")
             return
 
-        except Exception as e:
-            err_msg = str(e)
-            if "429" in err_msg or "quota" in err_msg.lower():
-                if attempt < 2:
-                    await asyncio.sleep(5)
-                    continue
-                else:
-                    await status_msg.edit_text("⏳ Сейчас слишком много запросов к генератору картинок. Подождите минуту.")
-            else:
-                await status_msg.edit_text(f"❌ Ошибка генерации Imagen API: {err_msg}")
-                return
+        input_file = types.BufferedInputFile(image_bytes, filename="generated_image.jpg")
+        await bot.delete_message(chat_id=current_chat_id, message_id=status_msg.message_id)
+        await message.reply_photo(photo=input_file, caption=f"✨ Готово! Запрос: <i>{image_prompt}</i>", parse_mode=ParseMode.HTML)
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Ошибка генерации: {str(e)}")
 
-
-# Расширенный хэндлер для обработки входящих картинок, документов, аудио и голосовых
 @dp.message(F.photo | F.document | F.audio | F.voice)
 async def handle_files(message: types.Message):
     global BOT_USERNAME, BOT_ID
     current_chat_id = message.chat.id
-
     if message.chat.type == "private" and message.from_user.id not in ALLOWED_USERS:
         await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
         return
-
     if message.chat.type in ["group", "supergroup"] and current_chat_id != ALLOWED_GROUP:
         try:
             await bot.leave_chat(current_chat_id)
@@ -189,30 +156,23 @@ async def handle_files(message: types.Message):
         await message.reply(f"❌ Не удалось загрузить файл: {str(e)}")
         return
 
-    file_part = genai_types.Part.from_bytes(
-        data=file_bytes,
-        mime_type=mime_type,
-    )
+    file_part = genai_types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
 
     if message.chat.type != "private" and chat_history[thread_id]:
         context = "\n".join(chat_history[thread_id])
-        prompt_text = f"История темы чата:\n{context}\n\nЗапрос к прикрепленному файлу: {user_text}"
+        prompt_text = f"История темы чата:\n{context}\n\nЗапрос к файлу: {user_text}"
     else:
         prompt_text = user_text if user_text else "Проанализируй содержимое этого медиафайла."
 
     await send_to_gemini(message, [file_part, prompt_text])
 
-
-# Обработчик обычных текстовых сообщений
 @dp.message()
 async def handle_message(message: types.Message):
     global BOT_USERNAME, BOT_ID
     current_chat_id = message.chat.id
-
     if message.chat.type == "private" and message.from_user.id not in ALLOWED_USERS:
         await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
         return
-
     if message.chat.type in ["group", "supergroup"] and current_chat_id != ALLOWED_GROUP:
         try:
             await bot.leave_chat(current_chat_id)
@@ -229,7 +189,6 @@ async def handle_message(message: types.Message):
             chat_history[thread_id].pop(0)
 
     if (message.chat.type == "private" and message.from_user.id in ALLOWED_USERS) or current_chat_id == ALLOWED_GROUP:
-        
         clean_request = message.text.replace(BOT_USERNAME, "").strip() if message.text else ""
         if not clean_request:
             clean_request = message.text
@@ -242,8 +201,40 @@ async def handle_message(message: types.Message):
 
         await send_to_gemini(message, [full_prompt])
 
-
-# Единая функция отправки запросов в Gemini API с обработкой ошибок
 async def send_to_gemini(message: types.Message, contents: list):
-    for attempt in range(3):
-        try:
+    try:
+        response = ai_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=contents,
+            config=TEXT_CONFIG
+        )
+        if not response.text:
+            await message.reply("🔄 Не удалось получить ответ. Попробуйте снова.")
+            return
+        raw_text = response.text.replace("**", "")
+        await message.reply(raw_text, parse_mode=ParseMode.HTML)
+    except Exception as e:
+        await message.reply(f"Ошибка Gemini API: {str(e)}")
+
+async def handle_ping(request):
+    return web.Response(text="Bot is running!")
+
+async def on_startup(app):
+    global BOT_USERNAME, BOT_ID
+    bot_info = await bot.get_me()
+    BOT_USERNAME = f"@{bot_info.username}"
+    BOT_ID = bot_info.id
+    await bot.set_webhook(f"{WEBHOOK_HOST}{WEBHOOK_PATH}")
+    print(f"Вебхук успешно установлен!")
+
+def main():
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
+    handler.register(app, path=WEBHOOK_PATH)
+    app.on_startup.append(on_startup)
+    setup_application(app, dp, bot=bot)
+    web.run_app(app, host="0.0.0.0", port=PORT)
+
+if __name__ == "__main__":
+    main()
