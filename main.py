@@ -77,7 +77,11 @@ async def generate_image_cmd(message: types.Message):
             pass
         return
 
-    image_prompt = message.text.split(maxsplit=1).strip() if len(message.text.split()) > 1 else ""
+    # Безопасное извлечение текста промпта без ошибок методов массивов
+    image_prompt = ""
+    if " " in message.text:
+        image_prompt = message.text.split(" ", 1)[1].strip()
+
     if not image_prompt:
         await message.reply("❌ <b>Вы не ввели описание для картинки!</b>\nПример использования:\n<code>/draw космический город</code>", parse_mode=ParseMode.HTML)
         return
