@@ -19,7 +19,7 @@ ai_client = genai.Client(api_key=GEMINI_KEY)
 
 GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "Вы — официальный ИИ-ассистент Gemini от Google. Ваши ответы должны полностью "
-    "соответствовать стилистике веб-интерфейса Google AI: будьте максимально полезным, "
+    "соответствовать стилитике веб-интерфейса Google AI: будьте максимально полезным, "
     "конкретным, технологичным и точным. Избегайте пространных вступлений и дежурных фраз.\n\n"
     "ПРАВИЛО ФОРМАТИРОВАНИЯ: Тебе КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать символы звездочек (*) "
     "или нижних подчеркиваний (_) для выделения текста. Если тебе нужно сделать текст "
@@ -39,7 +39,7 @@ chat_history = defaultdict(list)
 BOT_USERNAME = ""
 BOT_ID = 0
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Генерация картинок (Исправленный правильный идентификатор модели)
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Генерация картинок Imagen 3
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     current_chat_id = message.chat.id
@@ -59,7 +59,7 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
     status_msg = await message.reply("🎨 <i>Генерирую изображение по вашему запросу, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
 
     try:
-        # Корректный идентификатор модели Imagen для нового SDK google-genai
+        # Официальный вызов Imagen 3 в новом google-genai SDK
         result = ai_client.models.generate_images(
             model='imagen-3.0-generate-002',
             prompt=image_prompt,
@@ -98,7 +98,7 @@ async def start_cmd(message: types.Message):
         return
     await message.answer("Привет! Я официальный ассистент Gemini. Чем могу помочь?")
 
-# 3. Хэндлер входящих файлов и документов
+# 3. Хэндлер входящих файлов и документов (Модель gemini-3.6-flash)
 @dp.message(F.photo | F.document | F.audio | F.voice)
 async def handle_files(message: types.Message):
     global BOT_USERNAME, BOT_ID
@@ -152,7 +152,7 @@ async def handle_files(message: types.Message):
 
     await send_to_gemini(message, [file_part, prompt_text])
 
-# 4. Хэндлер обычных текстовых сообщений
+# 4. Хэндлер обычных текстовых сообщений (Модель gemini-3.6-flash)
 @dp.message(F.text)
 async def handle_message(message: types.Message):
     global BOT_USERNAME, BOT_ID
