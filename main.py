@@ -39,7 +39,7 @@ chat_history = defaultdict(list)
 BOT_USERNAME = ""
 BOT_ID = 0
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Генерация картинок Imagen 3
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Исправленная модель генерации картинок Imagen 3
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     current_chat_id = message.chat.id
@@ -59,7 +59,7 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
     status_msg = await message.reply("🎨 <i>Генерирую изображение по вашему запросу, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
 
     try:
-        # Официальный вызов Imagen 3 в новом google-genai SDK
+        # Официальный короткий идентификатор модели для нового SDK google-genai
         result = ai_client.models.generate_images(
             model='imagen-3.0-generate-002',
             prompt=image_prompt,
@@ -98,7 +98,7 @@ async def start_cmd(message: types.Message):
         return
     await message.answer("Привет! Я официальный ассистент Gemini. Чем могу помочь?")
 
-# 3. Хэндлер входящих файлов и документов (Модель gemini-3.6-flash)
+# 3. Хэндлер входящих файлов и документов
 @dp.message(F.photo | F.document | F.audio | F.voice)
 async def handle_files(message: types.Message):
     global BOT_USERNAME, BOT_ID
@@ -152,7 +152,7 @@ async def handle_files(message: types.Message):
 
     await send_to_gemini(message, [file_part, prompt_text])
 
-# 4. Хэндлер обычных текстовых сообщений (Модель gemini-3.6-flash)
+# 4. Хэндлер обычных текстовых сообщений
 @dp.message(F.text)
 async def handle_message(message: types.Message):
     global BOT_USERNAME, BOT_ID
