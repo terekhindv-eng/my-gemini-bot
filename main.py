@@ -22,8 +22,8 @@ try:
 except ValueError:
     ALLOWED_GROUP = 0
 
-# Ваш Telegram ID успешно вшит внутрь списка!
-ALLOWED_USERS = [490524856]  
+# Ваш Telegram ID надежно зафиксирован внутри списка (квадратных скобок)
+ALLOWED_USERS = [490524856]
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -78,7 +78,7 @@ async def generate_image_cmd(message: types.Message):
             pass
         return
 
-    # Нативное и на 100% безопасное извлечение промпта (это ГАРАНТИРОВАННО строка)
+    # Нативное и на 100% безопасное извлечение аргументов (строки), исключающее ошибку split
     image_prompt = message.get_args()
     if image_prompt:
         image_prompt = image_prompt.strip()
@@ -102,7 +102,7 @@ async def generate_image_cmd(message: types.Message):
         
         image_bytes = None
         if result and result.generated_images:
-            image_bytes = result.generated_images.image.image_bytes
+            image_bytes = result.generated_images[0].image.image_bytes
 
         if not image_bytes:
             await status_msg.edit_text("🔄 Не удалось сгенерировать картинку. Попробуйте другой запрос.")
@@ -177,7 +177,7 @@ async def handle_message(message: types.Message):
     global BOT_USERNAME, BOT_ID
     current_chat_id = message.chat.id
     if message.chat.type == "private" and message.from_user.id not in ALLOWED_USERS:
-        await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
+        await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Б打работает только в рабочей группе.")
         return
     if message.chat.type in ["group", "supergroup"] and current_chat_id != ALLOWED_GROUP:
         try:
