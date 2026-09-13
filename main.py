@@ -22,9 +22,6 @@ try:
 except ValueError:
     ALLOWED_GROUP = 0
 
-# Ваш Telegram ID успешно вшит внутрь списка!
-ALLOWED_USERS = [490524856]
-
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 ai_client = genai.Client(api_key=GEMINI_KEY)
@@ -53,7 +50,7 @@ BOT_ID = 0
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
-    if message.chat.type == "private" and message.from_user.id not in ALLOWED_USERS:
+    if message.chat.type == "private" and message.from_user.id != 490524856:
         await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
         return
     if message.chat.type in ["group", "supergroup"] and message.chat.id != ALLOWED_GROUP:
@@ -68,7 +65,7 @@ async def start_cmd(message: types.Message):
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message):
     current_chat_id = message.chat.id
-    if message.chat.type == "private" and message.from_user.id not in ALLOWED_USERS:
+    if message.chat.type == "private" and message.from_user.id != 490524856:
         await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
         return
     if message.chat.type in ["group", "supergroup"] and current_chat_id != ALLOWED_GROUP:
@@ -78,7 +75,6 @@ async def generate_image_cmd(message: types.Message):
             pass
         return
 
-    # Нативное и на 100% безопасное извлечение промпта (это ГАРАНТИРОВАННО строка)
     image_prompt = message.get_args()
     if image_prompt:
         image_prompt = image_prompt.strip()
@@ -118,7 +114,7 @@ async def generate_image_cmd(message: types.Message):
 async def handle_files(message: types.Message):
     global BOT_USERNAME, BOT_ID
     current_chat_id = message.chat.id
-    if message.chat.type == "private" and message.from_user.id not in ALLOWED_USERS:
+    if message.chat.type == "private" and message.from_user.id != 490524856:
         await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
         return
     if message.chat.type in ["group", "supergroup"] and current_chat_id != ALLOWED_GROUP:
@@ -176,7 +172,7 @@ async def handle_files(message: types.Message):
 async def handle_message(message: types.Message):
     global BOT_USERNAME, BOT_ID
     current_chat_id = message.chat.id
-    if message.chat.type == "private" and message.from_user.id not in ALLOWED_USERS:
+    if message.chat.type == "private" and message.from_user.id != 490524856:
         await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
         return
     if message.chat.type in ["group", "supergroup"] and current_chat_id != ALLOWED_GROUP:
@@ -194,7 +190,7 @@ async def handle_message(message: types.Message):
         if len(chat_history[thread_id]) > MAX_HISTORY:
             chat_history[thread_id].pop(0)
 
-    if (message.chat.type == "private" and message.from_user.id in ALLOWED_USERS) or current_chat_id == ALLOWED_GROUP:
+    if (message.chat.type == "private" and message.from_user.id == 490524856) or current_chat_id == ALLOWED_GROUP:
         clean_request = message.text.replace(BOT_USERNAME, "").strip() if message.text else ""
         if not clean_request:
             clean_request = message.text
