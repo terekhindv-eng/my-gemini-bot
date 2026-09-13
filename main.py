@@ -27,7 +27,7 @@ DRAW_CONFIG = genai_types.GenerateContentConfig(
 
 def check_chat(m): return not (m.chat.type == "private" and m.from_user.id != 490524856) and not (m.chat.type in ["group", "supergroup"] and m.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()))
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Автономный рендеринг графики силами ИИ Gemini
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Исправленное и точное чтение кандидатов из списка нового SDK google-genai
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     if not check_chat(message): return
@@ -41,15 +41,17 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
         )
 
         image_bytes = None
-        # Извлекаем созданный файл из результатов выполнения кода модели
-        if response.candidates and response.candidates.content.parts:
-            for part in response.candidates.content.parts:
-                if part.inline_data:
-                    image_bytes = part.inline_data.data
-                    break
+        # ИСПРАВЛЕНО: Читаем первый элемент списка кандидатов candidates[0]
+        if response.candidates and len(response.candidates) > 0:
+            content = response.candidates[0].content
+            if content and content.parts:
+                for part in content.parts:
+                    if part.inline_data:
+                        image_bytes = part.inline_data.data
+                        break
 
         if not image_bytes:
-            # Если графика вернулась текстом кода, выводим её в чат
+            # Если графика вернулась текстом кода или логов выполнения
             return await status_msg.edit_text(f"🤖 <b>Ответ модели:</b>\n{response.text or 'Не удалось построить график.'}")
 
         input_file = types.BufferedInputFile(image_bytes, filename="generated_image.png")
