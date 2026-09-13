@@ -19,7 +19,7 @@ ai_client = genai.Client(api_key=GEMINI_KEY)
 
 GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "Вы — официальный ИИ-ассистент Gemini от Google. Ваши ответы должны полностью "
-    "соответствовать стилистике веб-интерфейса Google AI: будьте максимально полезным, "
+    "соответствовать стилитике веб-интерфейса Google AI: будьте максимально полезным, "
     "конкретным, технологичным и точным. Избегайте пространных вступлений и дежурных фраз.\n\n"
     "ПРАВИЛО ФОРМАТИРОВАНИЯ: Тебе КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать символы звездочек (*) "
     "или нижних подчеркиваний (_) для выделения текста. Если тебе нужно сделать текст "
@@ -60,6 +60,7 @@ async def generate_image_cmd(message: types.Message):
     if message.chat.type in ["group", "supergroup"] and message.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()):
         return
 
+    # Полностью безопасное и чистое извлечение текста промпта без split ошибок
     image_prompt = message.get_args()
     if image_prompt:
         image_prompt = image_prompt.strip()
@@ -148,7 +149,7 @@ async def handle_files(message: types.Message):
 
     await send_to_gemini(message, [file_part, prompt_text])
 
-@dp.message()
+@dp.message(F.text)
 async def handle_message(message: types.Message):
     global BOT_USERNAME, BOT_ID
     current_chat_id = message.chat.id
@@ -180,8 +181,9 @@ async def handle_message(message: types.Message):
 
 async def send_to_gemini(message: types.Message, contents: list):
     try:
+        # Переключаемся на новую актуальную модель gemini-3.6-flash
         response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.6-flash',
             contents=contents,
             config=TEXT_CONFIG
         )
@@ -204,7 +206,6 @@ async def main():
     
     await bot.delete_webhook(drop_pending_updates=True)
     
-    # Запуск параллельного легковесного веб-сервера для мгновенного ответа хостингу Render
     app = web.Application()
     app.router.add_get("/", handle_ping)
     runner = web.AppRunner(app)
