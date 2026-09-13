@@ -75,6 +75,7 @@ async def generate_image_cmd(message: types.Message):
             pass
         return
 
+    # Полностью безопасное извлечение строки промпта средствами самого aiogram
     image_prompt = message.get_args()
     if image_prompt:
         image_prompt = image_prompt.strip()
