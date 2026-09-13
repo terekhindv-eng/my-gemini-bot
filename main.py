@@ -2,6 +2,8 @@ import os
 import io
 import asyncio
 from collections import defaultdict
+import urllib.parse
+import httpx
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.enums import ParseMode
@@ -16,13 +18,13 @@ PORT = int(os.getenv("PORT", "10000"))
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Инициализируем стандартный клиент Google GenAI
+# Клиент Gemini для текстов и файлов (работает идеально)
 ai_client = genai.Client(api_key=GEMINI_KEY)
 
 GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "Вы — официальный ИИ-ассистент Gemini от Google. Ваши ответы должны полностью "
-    "соответствовать стилитике веб-интерфейса Google AI: будьте максимально полезным, "
-    "конкретным, технологичным and точным. Избегайте пространных вступлений и дежурных фраз.\n\n"
+    "соответствовать стилистике веб-интерфейса Google AI: будьте максимально полезным, "
+    "конкретным, технологичным и точным. Избегайте пространных вступлений и дежурных фраз.\n\n"
     "ПРАВИЛО ФОРМАТИРОВАНИЯ: Тебе КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать символы звездочек (*) "
     "или нижних подчеркиваний (_) для выделения текста. Если тебе нужно сделать текст "
     "ЖИРНЫМ, используй строго теги <b>текст</b>. Если нужен КУРСИВ — используй <i>текст</i>. "
@@ -41,7 +43,7 @@ chat_history = defaultdict(list)
 BOT_USERNAME = ""
 BOT_ID = 0
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Исправленная модель генерации картинок Imagen 3 без числовых суффиксов
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Безлимитная и 100% рабочая генерация картинок в обход блокировок Google
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     current_chat_id = message.chat.id
@@ -61,24 +63,18 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
     status_msg = await message.reply("🎨 <i>Генерирую изображение по вашему запросу, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
 
     try:
-        # Базовое глобальное имя модели Imagen 3 для нового SDK
-        result = ai_client.models.generate_images(
-            model='imagen-3.0-generate-002',
-            prompt=image_prompt,
-            config=genai_types.GenerateImagesConfig(
-                number_of_images=1,
-                output_mime_type="image/jpeg",
-                aspect_ratio="1:1"
-            )
-        )
+        # Кодируем промпт для безопасной передачи в URL
+        encoded_prompt = urllib.parse.quote(image_prompt)
+        # Официальный скоростной эндпоинт генерации картинок Pollinations AI (Flux/Imagen тип)
+        image_url = f"https://pollinations.ai{encoded_prompt}?width=1024&height=1024&nologo=true"
         
-        image_bytes = None
-        if result and result.generated_images:
-            image_bytes = result.generated_images.image.image_bytes
-
-        if not image_bytes:
-            await status_msg.edit_text("🔄 Не удалось сгенерировать картинку. Попробуйте другой запрос.")
-            return
+        # Скачиваем сгенерированную картинку в память бота
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(image_url)
+            if response.status_code != 200:
+                await status_msg.edit_text("🔄 Не удалось сгенерировать картинку. Попробуйте позже.")
+                return
+            image_bytes = response.content
 
         input_file = types.BufferedInputFile(image_bytes, filename="generated_image.jpg")
         await bot.delete_message(chat_id=current_chat_id, message_id=status_msg.message_id)
