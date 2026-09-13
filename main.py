@@ -43,7 +43,7 @@ chat_history = defaultdict(list)
 BOT_USERNAME = ""
 BOT_ID = 0
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Безлимитная и 100% рабочая генерация картинок в обход блокировок Google
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Исправленный и стабильный эндпоинт генерации изображений
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     current_chat_id = message.chat.id
@@ -63,16 +63,16 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
     status_msg = await message.reply("🎨 <i>Генерирую изображение по вашему запросу, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
 
     try:
-        # Кодируем промпт для безопасной передачи в URL
+        # Кодируем текст запроса
         encoded_prompt = urllib.parse.quote(image_prompt)
-        # Официальный скоростной эндпоинт генерации картинок Pollinations AI (Flux/Imagen тип)
-        image_url = f"https://pollinations.ai{encoded_prompt}?width=1024&height=1024&nologo=true"
+        # Исправленный стабильный глобальный URL генератора Pollinations
+        image_url = f"https://pollinations.ai{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true"
         
         # Скачиваем сгенерированную картинку в память бота
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             response = await client.get(image_url)
             if response.status_code != 200:
-                await status_msg.edit_text("🔄 Не удалось сгенерировать картинку. Попробуйте позже.")
+                await status_msg.edit_text("🔄 Не удалось получить изображение от сервера. Попробуйте позже.")
                 return
             image_bytes = response.content
 
