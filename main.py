@@ -17,25 +17,18 @@ def check_chat(m):
     if m.chat.type in ["group", "supergroup"] and m.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()): return False
     return True
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Гарантированное скачивание байт в память Render и отправка файла в Telegram
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Автономное скачивание БЕЗ участия Gemini (100% защита от ошибки 429)
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     if not check_chat(message): return
     if not command.args: return await message.reply("❌ Введите описание! Пример: <code>/draw космос</code>", parse_mode=ParseMode.HTML)
     
-    status_msg = await message.reply("🎨 <i>Генерирую и загружаю изображение высокого разрешения, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
+    status_msg = await message.reply("🎨 <i>Генерирую и загружаю изображение высокого разрешения...</i>", parse_mode=ParseMode.HTML)
     try:
         clean_prompt = command.args.strip()
         
-        # Переводим запрос на английский язык силами Gemini для стабильности генерации
-        translate_res = ai_client.models.generate_content(
-            model='gemini-3.6-flash',
-            contents=[f"Translate this prompt to English for image generation, output ONLY the translation, no other text: {clean_prompt}"]
-        )
-        en_prompt = translate_res.text.strip() if translate_res.text else clean_prompt
-        
-        # Подготовка безопасного URL
-        encoded_prompt = urllib.parse.quote(en_prompt)
+        # Передаем сырой промпт напрямую в URL, минуя вызовы Google API
+        encoded_prompt = urllib.parse.quote(clean_prompt)
         image_url = f"https://pollinations.ai{encoded_prompt}.jpg?width=1024&height=1024&nologo=true&enhance=true"
         
         # Скачиваем изображение напрямую в оперативную память сервера Render
@@ -44,13 +37,12 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
             response = await client.get(image_url, headers=headers)
             
             if response.status_code != 200:
-                return await status_msg.edit_text(f"🔄 Сервер генерации перегружен (статус {response.status_code}). Попробуйте еще раз.")
+                return await status_msg.edit_text(f"🔄 Сервер генерации временно перегружен (код {response.status_code}). Попробуйте позже.")
             image_bytes = response.content
 
         if not image_bytes:
             return await status_msg.edit_text("🔄 Ошибка: не удалось получить данные изображения.")
 
-        # Упаковываем байты в BufferedInputFile и отправляем как полноценный локальный медиафайл
         input_file = types.BufferedInputFile(image_bytes, filename="generated_image.jpg")
         
         await message.reply_photo(
