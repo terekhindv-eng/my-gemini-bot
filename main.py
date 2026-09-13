@@ -12,7 +12,7 @@ ai_client = genai.Client(api_key=GEMINI_KEY)
 GOOGLE_AI_SYSTEM_INSTRUCTION = "Вы — official Google Gemini AI. Запрещено использовать (*) или (_) для выделения текста. Если нужно сделать текст ЖИРНЫМ, используй теги <b>текст</b>, КУРСИВ — <i>текст</i>."
 TEXT_CONFIG = genai_types.GenerateContentConfig(system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION, temperature=0.7)
 
-# Специальная конфигурация для генерации графики через запуск кода на серверах Google
+# Конфигурация рисования: просим модель вернуть картинку через исполнение кода
 DRAW_CONFIG = genai_types.GenerateContentConfig(
     system_instruction=(
         "Ты — генератор изображений. Твоя единственная задача — написать Python-код "
@@ -27,7 +27,7 @@ DRAW_CONFIG = genai_types.GenerateContentConfig(
 
 def check_chat(m): return not (m.chat.type == "private" and m.from_user.id != 490524856) and not (m.chat.type in ["group", "supergroup"] and m.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()))
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Исправленное и точное чтение кандидатов из списка нового SDK google-genai
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Исправленное чтение байт графики напрямую из частей ответа response.parts
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     if not check_chat(message): return
@@ -41,17 +41,16 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
         )
 
         image_bytes = None
-        # ИСПРАВЛЕНО: Читаем первый элемент списка кандидатов candidates[0]
-        if response.candidates and len(response.candidates) > 0:
-            content = response.candidates[0].content
-            if content and content.parts:
-                for part in content.parts:
-                    if part.inline_data:
-                        image_bytes = part.inline_data.data
-                        break
+        # Проверяем части ответа напрямую через response.parts по канонам нового SDK
+        if response.parts:
+            for part in response.parts:
+                # Если в ответе лежат сгенерированные бинарные данные картинки
+                if part.inline_data:
+                    image_bytes = part.inline_data.data
+                    break
 
         if not image_bytes:
-            # Если графика вернулась текстом кода или логов выполнения
+            # Если бинарных данных нет, выводим логи выполнения или текст кода в чат
             return await status_msg.edit_text(f"🤖 <b>Ответ модели:</b>\n{response.text or 'Не удалось построить график.'}")
 
         input_file = types.BufferedInputFile(image_bytes, filename="generated_image.png")
