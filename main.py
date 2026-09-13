@@ -88,7 +88,7 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
                     break
 
         if not image_bytes:
-            await status_msg.edit_text(f"🤖 <b>Ответ модели:</b>\n{response.text}", parse_mode=Update.HTML if 'Update' in globals() else ParseMode.HTML)
+            await status_msg.edit_text(f"🤖 <b>Ответ модели:</b>\n{response.text}", parse_mode=ParseMode.HTML)
             return
 
         input_file = types.BufferedInputFile(image_bytes, filename="generated_image.png")
@@ -222,7 +222,7 @@ async def main():
     
     await bot.delete_webhook(drop_pending_updates=True)
     
-    # Решаем проблему Render: открываем веб-порт 10000
+    # Открываем веб-порт 10000 для прохождения проверки хостинга Render
     app = web.Application()
     app.router.add_get("/", handle_ping)
     runner = web.AppRunner(app)
