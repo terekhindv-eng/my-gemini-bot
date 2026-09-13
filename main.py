@@ -1,4 +1,4 @@
-import os, io, asyncio, threading, http.server
+import os, io, asyncio, threading, http.server, urllib.parse, httpx
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.enums import ParseMode
@@ -7,47 +7,36 @@ from google.genai import types as genai_types
 
 TOKEN, GEMINI_KEY, PORT = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("GEMINI_API_KEY"), int(os.getenv("PORT", "10000"))
 bot, dp = Bot(token=TOKEN), Dispatcher()
-
-# Инициализируем стандартный клиент Google GenAI на стабильной версии v1
 ai_client = genai.Client(api_key=GEMINI_KEY)
-
-chat_history, BOT_USERNAME, BOT_ID = {}, "", 0
 
 GOOGLE_AI_SYSTEM_INSTRUCTION = "Вы — official Google Gemini AI. Запрещено использовать (*) или (_) для выделения текста. Если нужно сделать текст ЖИРНЫМ, используй теги <b>текст</b>, КУРСИВ — <i>текст</i>."
 TEXT_CONFIG = genai_types.GenerateContentConfig(system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION, temperature=0.7)
 
 def check_chat(m): return not (m.chat.type == "private" and m.from_user.id != 490524856) and not (m.chat.type in ["group", "supergroup"] and m.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()))
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Исправленная генерация картинок Imagen 3 по официальным канонам google-genai
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Высокоскоростная безлимитная генерация картинок (100% обход блокировок)
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     if not check_chat(message): return
     if not command.args: return await message.reply("❌ Введите описание! Пример: <code>/draw космос</code>", parse_mode=ParseMode.HTML)
-    status_msg = await message.reply("🎨 <i>Генерирую изображение через Imagen 3, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
+    status_msg = await message.reply("🎨 <i>Генерирую изображение высокого разрешения, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
     try:
-        # Убрали лишние параметры валидации pydantic, имя модели — чистое каноническое
-        result = ai_client.models.generate_images(
-            model='imagen-3.0-generate-002',
-            prompt=command.args.strip(),
-            config=genai_types.GenerateImagesConfig(
-                number_of_images=1,
-                output_mime_type="image/jpeg",
-                aspect_ratio="1:1"
-            )
-        )
+        # Кодируем текст запроса для безопасной передачи в URL
+        encoded_prompt = urllib.parse.quote(command.args.strip())
+        image_url = f"https://pollinations.ai{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true"
         
-        image_bytes = None
-        if result and result.generated_images:
-            image_bytes = result.generated_images.image.image_bytes
-
-        if not image_bytes:
-            return await status_msg.edit_text("🔄 Не удалось получить байты изображения от Google API.")
+        # Скачиваем сгенерированную картинку напрямую в оперативную память Render
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.get(image_url)
+            if response.status_code != 200:
+                return await status_msg.edit_text("🔄 Сервер генерации временно перегружен. Попробуйте позже.")
+            image_bytes = response.content
 
         input_file = types.BufferedInputFile(image_bytes, filename="generated_image.jpg")
         await bot.delete_message(message.chat.id, status_msg.message_id)
         await message.reply_photo(photo=input_file, caption=f"✨ Готово! Запрос: <i>{command.args.strip()}</i>", parse_mode=ParseMode.HTML)
     except Exception as e: 
-        await status_msg.edit_text(f"❌ Ошибка генерации Google API:\n<code>{str(e)}</code>", parse_mode=ParseMode.HTML)
+        await status_msg.edit_text(f"❌ Ошибка рендеринга:\n<code>{str(e)}</code>", parse_mode=ParseMode.HTML)
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
@@ -81,9 +70,9 @@ def run_http_server():
     http.server.HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 async def main():
-    global BOT_USERNAME, BOT_ID
+    global BOT_USERNAME
     info = await bot.get_me()
-    BOT_USERNAME, BOT_ID = f"@{info.username}", info.id
+    BOT_USERNAME = f"@{info.username}"
     await bot.delete_webhook(drop_pending_updates=True)
     threading.Thread(target=run_http_server, daemon=True).start()
     print(f"Бот {BOT_USERNAME} запущен!"); await dp.start_polling(bot)
