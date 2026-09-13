@@ -7,11 +7,9 @@ from aiogram.filters import CommandStart, Command
 from aiogram.enums import ParseMode
 from google import genai
 from google.genai import types as genai_types
-from aiohttp import web
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-PORT = int(os.getenv("PORT", "10000"))
 
 # 1. Настройка разрешенной группы
 try:
@@ -87,7 +85,7 @@ async def generate_image_cmd(message: types.Message):
             pass
         return
 
-    image_prompt = message.text.split(maxsplit=1).strip() if len(message.text.split()) > 1 else ""
+    image_prompt = message.text.split(maxsplit=1)[1].strip() if len(message.text.split()) > 1 else ""
 
     if not image_prompt:
         await message.reply("❌ <b>Вы не ввели описание для картинки!</b>\nПример использования:\n<code>/draw милый рыжий кот в очках космического скафандра</code>", parse_mode=ParseMode.HTML)
@@ -243,3 +241,4 @@ async def handle_message(message: types.Message):
                 f"\"\"\"\n{context}\n\"\"\"\n\n"
                 f"Fulfill the user's request based on this chat history: {clean_request}"
             )
+        else:
