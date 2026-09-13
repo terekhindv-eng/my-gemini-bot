@@ -110,7 +110,7 @@ async def generate_image_cmd(message: types.Message):
 
             image_bytes = None
             if result.generated_images:
-                image_bytes = result.generated_images[0].image.image_bytes
+                image_bytes = result.generated_images.image.image_bytes
 
             if not image_bytes:
                 await status_msg.edit_text("🔄 Извините, не удалось извлечь изображение из ответа ИИ. Попробуйте изменить формулировку промпта.")
