@@ -1,4 +1,4 @@
-import os, io, asyncio, threading, http.server, urllib.parse
+import os, io, asyncio, threading, http.server, urllib.parse, urllib.request
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.enums import ParseMode
@@ -14,31 +14,43 @@ TEXT_CONFIG = genai_types.GenerateContentConfig(system_instruction=GOOGLE_AI_SYS
 
 def check_chat(m): return not (m.chat.type == "private" and m.from_user.id != 490524856) and not (m.chat.type in ["group", "supergroup"] and m.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()))
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Инлайн-вывод через reply_document с очисткой пробелов
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Скачивание через нативный urllib в память и гарантированная отправка файла
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     if not check_chat(message): return
     if not command.args: return await message.reply("❌ Введите описание! Пример: <code>/draw космос</code>", parse_mode=ParseMode.HTML)
     
-    status_msg = await message.reply("🎨 <i>Формирую высокоскоростной графический рендер карточки...</i>", parse_mode=ParseMode.HTML)
+    status_msg = await message.reply("🎨 <i>Генерирую и скачиваю изображение, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
     try:
         clean_prompt = command.args.strip()
-        # Заменяем пробелы на дефисы, чтобы URL был абсолютно сплошным без %20
-        url_prompt = clean_prompt.replace(" ", "-")
-        encoded_prompt = urllib.parse.quote(url_prompt)
+        encoded_prompt = urllib.parse.quote(clean_prompt)
         
-        # Финальная чистая инлайн-ссылка
-        fast_image_url = f"https://pollinations.ai{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true&file=.png"
+        # Стабильная ссылка генератора
+        image_url = f"https://pollinations.ai{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true"
         
-        # Используем reply_document вместо reply_photo для обхода строгой валидации URL в Telegram
-        await message.reply_document(
-            document=fast_image_url, 
-            caption=f"✨ <b>Готово! Графический рендер собран.</b>\nЗапрос: <i>{clean_prompt}</i>", 
+        # Скачиваем картинку через нативный urllib.request в фоновом потоке, чтобы не вешать бота
+        def download_file():
+            req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=30) as response:
+                return response.read()
+                
+        image_bytes = await asyncio.to_thread(download_file)
+
+        if not image_bytes:
+            return await status_msg.edit_text("🔄 Ошибка: не удалось получить данные от сервера генерации.")
+
+        # Упаковываем байты в локальный файл Telegram
+        input_file = types.BufferedInputFile(image_bytes, filename="generated_image.jpg")
+        
+        # Отправляем как настоящее ФОТО (а не ссылку) — теперь Telegram примет его мгновенно
+        await message.reply_photo(
+            photo=input_file, 
+            caption=f"✨ <b>Готово!</b>\nЗапрос: <i>{clean_prompt}</i>", 
             parse_mode=ParseMode.HTML
         )
-        await bot.delete_message(message.chat.id, status_msg.message_id)
+        await bot.delete_message(message.chat.id, status_msg.status_msg.message_id if hasattr(status_msg, 'status_msg') else status_msg.message_id)
     except Exception as e: 
-        await status_msg.edit_text(f"❌ Ошибка вывода карточки:\n<code>{str(e)}</code>", parse_mode=ParseMode.HTML)
+        await status_msg.edit_text(f"❌ Ошибка генерации:\n<code>{str(e)}</code>", parse_mode=ParseMode.HTML)
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
