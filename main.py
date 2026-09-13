@@ -74,7 +74,6 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
     status_msg = await message.reply("🎨 <i>Генерирую графику по вашему запросу на серверах Google, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
 
     try:
-        # Просим Gemini написать и выполнить код для создания картинки
         response = ai_client.models.generate_content(
             model='gemini-3.6-flash',
             contents=[f"Нарисуй и сохрани в 'output.png': {image_prompt}"],
@@ -82,16 +81,14 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
         )
 
         image_bytes = None
-        # Извлекаем созданный файл из результатов выполнения кода модели
-        if response.candidates and response.candidates[0].content.parts:
-            for part in response.candidates[0].content.parts:
+        if response.candidates and response.candidates.content.parts:
+            for part in response.candidates.content.parts:
                 if part.inline_data:
                     image_bytes = part.inline_data.data
                     break
 
         if not image_bytes:
-            # Если файл вернулся в текстовом ответе текстом, пробуем стандартный вывод текста
-            await status_msg.edit_text(f"🤖 <b>Ответ модели:</b>\n{response.text}", parse_mode=ParseMode.HTML)
+            await status_msg.edit_text(f"🤖 <b>Ответ модели:</b>\n{response.text}", parse_mode=Update.HTML if 'Update' in globals() else ParseMode.HTML)
             return
 
         input_file = types.BufferedInputFile(image_bytes, filename="generated_image.png")
@@ -225,6 +222,7 @@ async def main():
     
     await bot.delete_webhook(drop_pending_updates=True)
     
+    # Решаем проблему Render: открываем веб-порт 10000
     app = web.Application()
     app.router.add_get("/", handle_ping)
     runner = web.AppRunner(app)
