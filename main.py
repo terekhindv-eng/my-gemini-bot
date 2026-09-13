@@ -1,7 +1,6 @@
 import os
 import io
 import asyncio
-import re
 from collections import defaultdict
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
@@ -23,16 +22,19 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 genai.configure(api_key=GEMINI_KEY)
 
-# Стилистика общения в духе оригинального веб-интерфейса Google AI Gemini
+# Стилистика общения Google AI + жесткое требование использовать HTML-теги для форматирования
 GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "Вы — официальный ИИ-ассистент Gemini от Google. Ваши ответы должны полностью "
     "соответствовать стилистике веб-интерфейса Google AI: будьте максимально полезным, "
-    "конкретным, технологичным и точным. Избегайте пространных вступлений и дежурных фраз. "
-    "Используйте структурированные списки и выделение важного текста жирным шрифтом, если это "
-    "помогает восприятию информации. Пишите в профессиональном, но дружелюбном тоне."
+    "конкретным, технологичным и точным. Избегайте пространных вступлений и дежурных фраз.\n\n"
+    "ПРАВИЛО ФОРМАТИРОВАНИЯ: Тебе КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать символы звездочек (*) "
+    "или нижних подчеркиваний (_) для выделения текста. Если тебе нужно сделать текст "
+    "ЖИРНЫМ, используй строго теги <b>текст</b>. Если нужен КУРСИВ — используй <i>текст</i>. "
+    "Для оформления списков используй стандартные маркеры (например, обычный дефис или точку) "
+    "и перенос строки. Пиши в профессиональном, но дружелюбном тоне."
 )
 
-# Передаем системную инструкцию строго при создании модели
+# Передаем системную инструкцию при создании модели
 model = genai.GenerativeModel(
     "gemini-3.6-flash",
     system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION
@@ -45,12 +47,6 @@ chat_history = []
 # Глобальные переменные данных бота
 BOT_USERNAME = ""
 BOT_ID = 0
-
-# Функция для безопасного экранирования текста под формат MarkdownV2
-def escape_markdown(text: str) -> str:
-    # Символы, которые Telegram требует экранировать в MarkdownV2 вне блоков кода
-    escape_chars = r'_*[]()~`>#+-=|{}.!'
-    return re.sub(r'([%s])' % re.escape(escape_chars), r'\\\1', text)
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
@@ -177,9 +173,13 @@ async def send_to_gemini(message: types.Message, contents: list):
                 await message.reply("🔄 Извините, не удалось сгенерировать ответ. Попробуйте еще раз.")
                 return
 
-            # Безопасно форматируем текст и отправляем через MarkdownV2
-            formatted_text = escape_markdown(response.text)
-            await message.reply(formatted_text, parse_mode=ParseMode.MARKDOWN_V2)
+            raw_text = response.text
+            
+            # На всякий случай заменяем сырые маркеры Markdown, если ИИ проигнорирует инструкцию
+            raw_text = raw_text.replace("**", "")
+
+            # Отправляем ответ, используя безопасный режим HTML
+            await message.reply(raw_text, parse_mode=ParseMode.HTML)
             return
             
         except Exception as e:
