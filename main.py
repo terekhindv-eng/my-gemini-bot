@@ -6,7 +6,14 @@ from google import genai
 from google.genai import types as genai_types
 
 TOKEN, GEMINI_KEY, PORT = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("GEMINI_API_KEY"), int(os.getenv("PORT", "10000"))
-bot, dp, ai_client = Bot(token=TOKEN), Dispatcher(), genai.Client(api_key=GEMINI_KEY)
+bot, dp = Bot(token=TOKEN), Dispatcher()
+
+# Инициализируем клиент с глобальным переключением на v1beta канал для поддержки Imagen 3
+ai_client = genai.Client(
+    api_key=GEMINI_KEY,
+    http_options={'api_version': 'v1beta'}
+)
+
 chat_history, BOT_USERNAME, BOT_ID = {}, "", 0
 
 GOOGLE_AI_SYSTEM_INSTRUCTION = "Вы — official Google Gemini AI. Запрещено использовать (*) или (_) для выделения текста. Если нужно сделать текст ЖИРНЫМ, используй теги <b>текст</b>, КУРСИВ — <i>текст</i>."
@@ -14,14 +21,13 @@ TEXT_CONFIG = genai_types.GenerateContentConfig(system_instruction=GOOGLE_AI_SYS
 
 def check_chat(m): return not (m.chat.type == "private" and m.from_user.id != 490524856) and not (m.chat.type in ["group", "supergroup"] and m.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()))
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Исправленная генерация картинок Imagen 3 без префикса "models/"
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Исправленная генерация картинок Imagen 3 через v1beta канал
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     if not check_chat(message): return
     if not command.args: return await message.reply("❌ Введите описание! Пример: <code>/draw космос</code>", parse_mode=ParseMode.HTML)
     status_msg = await message.reply("🎨 <i>Генерирую изображение через Imagen 3, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
     try:
-        # Передаем только имя модели. SDK сам добавит нужный префикс "models/" под капотом
         result = ai_client.models.generate_images(
             model='imagen-3.0-generate-002',
             prompt=command.args.strip(),
