@@ -22,7 +22,8 @@ try:
 except ValueError:
     ALLOWED_GROUP = 0
 
-ALLOWED_USERS = [490524856]  # ОБЯЗАТЕЛЬНО вставьте ваш числовой Telegram ID внутрь скобок!
+# Укажите ваш числовой Telegram ID внутрь скобок
+ALLOWED_USERS = [490524856]  
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -77,10 +78,10 @@ async def generate_image_cmd(message: types.Message):
             pass
         return
 
-    # Полностью безопасное извлечение промпта без вызова .strip() над массивами
-    image_prompt = ""
-    if " " in message.text:
-        image_prompt = message.text.split(" ", 1)[1].strip()
+    # Безопасное извлечение аргументов команды (удаляем лишние пробелы)
+    image_prompt = message.get_args()
+    if image_prompt:
+        image_prompt = image_prompt.strip()
 
     if not image_prompt:
         await message.reply("❌ <b>Вы не ввели описание для картинки!</b>\nПример использования:\n<code>/draw космический город</code>", parse_mode=ParseMode.HTML)
@@ -98,12 +99,14 @@ async def generate_image_cmd(message: types.Message):
                 aspect_ratio="1:1"
             )
         )
+        
         image_bytes = None
-        if result.generated_images:
+        # Проверяем структуру ответа и берём первый сгенерированный элемент из списка
+        if result and result.generated_images:
             image_bytes = result.generated_images[0].image.image_bytes
 
         if not image_bytes:
-            await status_msg.edit_text("🔄 Не удалось сгенерировать картинку. Попробуйте другой запрос.")
+            await status_msg.edit_text("🔄 Не удалось извлечь изображение. Попробуйте изменить описание.")
             return
 
         input_file = types.BufferedInputFile(image_bytes, filename="generated_image.jpg")
