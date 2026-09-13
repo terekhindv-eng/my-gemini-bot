@@ -15,7 +15,12 @@ PORT = int(os.getenv("PORT", "10000"))
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
-ai_client = genai.Client(api_key=GEMINI_KEY)
+
+# Инициализируем клиент с принудительным переключением на v1beta для работы Imagen 3
+ai_client = genai.Client(
+    api_key=GEMINI_KEY,
+    http_options={'api_version': 'v1beta'}
+)
 
 GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "Вы — официальный ИИ-ассистент Gemini от Google. Ваши ответы должны полностью "
@@ -39,7 +44,7 @@ chat_history = defaultdict(list)
 BOT_USERNAME = ""
 BOT_ID = 0
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Генерация картинок Imagen 3 (Проверено по официальному SDK)
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Генерация картинок Imagen 3 через v1beta канал
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     current_chat_id = message.chat.id
@@ -59,7 +64,6 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
     status_msg = await message.reply("🎨 <i>Генерирую изображение по вашему запросу, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
 
     try:
-        # Строгое использование канонического имени модели Imagen 3
         result = ai_client.models.generate_images(
             model='imagen-3.0-generate-002',
             prompt=image_prompt,
