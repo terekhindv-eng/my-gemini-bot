@@ -3,7 +3,7 @@ import io
 import asyncio
 from collections import defaultdict
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.enums import ParseMode
 from google import genai
 from google.genai import types as genai_types
@@ -19,7 +19,7 @@ ai_client = genai.Client(api_key=GEMINI_KEY)
 
 GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "Вы — официальный ИИ-ассистент Gemini от Google. Ваши ответы должны полностью "
-    "соответствовать стилистике веб-интерфейса Google AI: будьте максимально полезным, "
+    "соответствовать стилитике веб-интерфейса Google AI: будьте максимально полезным, "
     "конкретным, технологичным и точным. Избегайте пространных вступлений и дежурных фраз.\n\n"
     "ПРАВИЛО ФОРМАТИРОВАНИЯ: Тебе КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать символы звездочек (*) "
     "или нижних подчеркиваний (_) для выделения текста. Если тебе нужно сделать текст "
@@ -39,17 +39,17 @@ chat_history = defaultdict(list)
 BOT_USERNAME = ""
 BOT_ID = 0
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Генерация картинок (Наивысший приоритет)
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Генерация картинок по стандартам aiogram 3.x
 @dp.message(Command("draw", "рендери"))
-async def generate_image_cmd(message: types.Message):
+async def generate_image_cmd(message: types.Message, command: CommandObject):
     current_chat_id = message.chat.id
     if message.chat.type == "private" and message.from_user.id != 490524856:
         return
     if message.chat.type in ["group", "supergroup"] and message.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()):
         return
 
-    # Нативное и полностью безопасное извлечение аргументов команды
-    image_prompt = message.get_args()
+    # Правильное извлечение аргументов в aiogram 3.x
+    image_prompt = command.args
     if image_prompt:
         image_prompt = image_prompt.strip()
 
