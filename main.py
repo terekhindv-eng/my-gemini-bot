@@ -16,13 +16,13 @@ PORT = int(os.getenv("PORT", "10000"))
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Инициализируем стандартный клиент Google GenAI строго на стабильной версии v1 (без http_options)
+# Инициализируем стандартный клиент Google GenAI
 ai_client = genai.Client(api_key=GEMINI_KEY)
 
 GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "Вы — официальный ИИ-ассистент Gemini от Google. Ваши ответы должны полностью "
-    "соответствовать стилистике веб-интерфейса Google AI: будьте максимально полезным, "
-    "конкретным, технологичным и точным. Избегайте пространных вступлений и дежурных фраз.\n\n"
+    "соответствовать стилитике веб-интерфейса Google AI: будьте максимально полезным, "
+    "конкретным, технологичным and точным. Избегайте пространных вступлений и дежурных фраз.\n\n"
     "ПРАВИЛО ФОРМАТИРОВАНИЯ: Тебе КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать символы звездочек (*) "
     "или нижних подчеркиваний (_) для выделения текста. Если тебе нужно сделать текст "
     "ЖИРНЫМ, используй строго теги <b>текст</b>. Если нужен КУРСИВ — используй <i>текст</i>. "
@@ -41,7 +41,7 @@ chat_history = defaultdict(list)
 BOT_USERNAME = ""
 BOT_ID = 0
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Генерация картинок по стандартам стабильной версии v1
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Исправленная модель генерации картинок Imagen 3 без числовых суффиксов
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     current_chat_id = message.chat.id
@@ -61,7 +61,7 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
     status_msg = await message.reply("🎨 <i>Генерирую изображение по вашему запросу, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
 
     try:
-        # Используем точное имя модели без префиксов
+        # Базовое глобальное имя модели Imagen 3 для нового SDK
         result = ai_client.models.generate_images(
             model='imagen-3.0-generate-002',
             prompt=image_prompt,
