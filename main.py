@@ -15,7 +15,7 @@ from aiohttp import web
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
-ADMIN_ID = 490524856  # Ваш подтвержденный ID администратора для ЛС
+ADMIN_ID = 490524856  # Ваш ID администратора для ЛС
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -46,7 +46,7 @@ BOT_ID = 0
 
 # Функция строгой проверки доступа к чатам и личке
 def check_chat(message: types.Message) -> bool:
-    # 1. Проверка личных сообщений (только для ADMIN_ID)
+    # 1. Проверка личных сообщений (строго для ADMIN_ID)
     if message.chat.type == "private" and message.from_user.id != ADMIN_ID:
         return False
     
@@ -94,7 +94,7 @@ async def handle_files(message: types.Message):
         file_label = "[Голосовое сообщение]"
     elif message.audio:
         file_info = message.audio
-        mime_type = message.audio.mime_type or "audio/mp3"
+        mime_type = "audio/mp3"
         file_label = "[Аудиофайл]"
     else:
         file_info = message.document
@@ -135,7 +135,7 @@ async def handle_message(message: types.Message):
         user_name = message.from_user.full_name or "Пользователь"
         chat_history[thread_id].append(f"{user_name}: {message.text}")
 
-    # Бот реагирует в ЛС всегда, в группе — на полное имя, имя без @ или на ответ (Reply)
+    # Триггер срабатывания: ЛС, полное имя @username, имя без @ или Reply на сообщение бота
     is_triggered = (
         message.chat.type == "private" or 
         (message.text and BOT_USERNAME.lower() in message.text.lower()) or
@@ -163,11 +163,11 @@ async def handle_message(message: types.Message):
 
         await send_to_gemini(message, [full_prompt])
 
-# Функция отправки запросов в Google GenAI API с доступной моделью gemini-3-flash
+# Функция отправки запросов в Google GenAI API с корректным именем модели
 async def send_to_gemini(message: types.Message, contents: list):
     try:
         response = ai_client.models.generate_content(
-            model='gemini-3-flash',  # Актуальная рабочая модель поколения Gemini 3
+            model='gemini-3.6-flash',  # Полное системное имя актуальной и доступной модели 
             contents=contents,
             config=TEXT_CONFIG
         )
