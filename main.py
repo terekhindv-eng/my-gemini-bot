@@ -1,4 +1,4 @@
-import os, io, asyncio, re, threading, http.server, glob
+import os, io, asyncio, threading, http.server
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.enums import ParseMode
@@ -11,48 +11,39 @@ chat_history, BOT_USERNAME, BOT_ID = {}, "", 0
 
 GOOGLE_AI_SYSTEM_INSTRUCTION = "Вы — official Google Gemini AI. Запрещено использовать (*) или (_) для выделения текста. Если нужно сделать текст ЖИРНЫМ, используй теги <b>текст</b>, КУРСИВ — <i>текст</i>."
 TEXT_CONFIG = genai_types.GenerateContentConfig(system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION, temperature=0.7)
-DRAW_CONFIG = genai_types.GenerateContentConfig(
-    system_instruction="Ты — генератор графики на Python. Напиши полноценный скрипт с использованием matplotlib или PIL, который визуализирует запрос пользователя и сохраняет результат в файл 'output.png'. Выводи код внутри стандартного блока ```python.",
-    tools=[{'code_execution': {}}], temperature=0.3
-)
 
 def check_chat(m): return not (m.chat.type == "private" and m.from_user.id != 490524856) and not (m.chat.type in ["group", "supergroup"] and m.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()))
 
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Официальная и стабильная генерация картинок через Imagen 3
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     if not check_chat(message): return
     if not command.args: return await message.reply("❌ Введите описание! Пример: <code>/draw космос</code>", parse_mode=ParseMode.HTML)
-    status_msg = await message.reply("🎨 <i>Генерирую графику на серверах Google...</i>", parse_mode=ParseMode.HTML)
+    status_msg = await message.reply("🎨 <i>Генерирую изображение через Imagen 3, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
     try:
-        res = ai_client.models.generate_content(model='gemini-3.6-flash', contents=[f"Нарисуй и сохрани в 'output.png': {command.args.strip()}"], config=DRAW_CONFIG)
-        img_bytes = None
-        if res.candidates and res.candidates.content.parts:
-            for p in res.candidates.content.parts:
-                if p.inline_data: img_bytes = p.inline_data.data; break
-        if not img_bytes and res.text:
-            cb = re.search(r"```python(.*?)```", res.text, re.DOTALL)
-            script = cb.group(1).strip() if cb else res.text
-            if any(x in script for x in ["png", "plt", "Image", "save"]):
-                try:
-                    # Чистим старые картинки перед запуском, чтобы не отправить прошлый результат
-                    for old_img in glob.glob("*.png"):
-                        try: os.remove(old_img)
-                        except: pass
-                    
-                    loc = {}
-                    exec(script, {}, loc)
-                    
-                    # Поиск ЛЮБОГО сгенерированного PNG-файла в папке проекта
-                    png_files = glob.glob("*.png")
-                    if png_files:
-                        target_file = png_files[0]
-                        with open(target_file, "rb") as f: img_bytes = f.read()
-                        os.remove(target_file)
-                except Exception: pass
-        if not img_bytes: return await status_msg.edit_text(f"🤖 <b>Ответ модели:</b>\n{res.text or 'Ошибка рендеринга.'}")
+        # Официальный синтаксис google-genai SDK 1.x
+        result = ai_client.models.generate_images(
+            model='imagen-3.0-generate-002',
+            prompt=command.args.strip(),
+            config=genai_types.GenerateImagesConfig(
+                number_of_images=1,
+                output_mime_type="image/jpeg",
+                aspect_ratio="1:1"
+            )
+        )
+        
+        image_bytes = None
+        if result and result.generated_images:
+            image_bytes = result.generated_images.image.image_bytes
+
+        if not image_bytes:
+            return await status_msg.edit_text("🔄 Не удалось получить байты изображения от Google API.")
+
+        input_file = types.BufferedInputFile(image_bytes, filename="generated_image.jpg")
         await bot.delete_message(message.chat.id, status_msg.message_id)
-        await message.reply_photo(photo=types.BufferedInputFile(img_bytes, filename="img.png"), caption=f"✨ Готово! Рендер: <i>{command.args.strip()}</i>", parse_mode=ParseMode.HTML)
-    except Exception as e: await status_msg.edit_text(f"❌ Ошибка: {str(e)}")
+        await message.reply_photo(photo=input_file, caption=f"✨ Готово! Запрос: <i>{command.args.strip()}</i>", parse_mode=ParseMode.HTML)
+    except Exception as e: 
+        await status_msg.edit_text(f"❌ Ошибка генерации Google API:\n<code>{str(e)}</code>", parse_mode=ParseMode.HTML)
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
@@ -61,7 +52,7 @@ async def start_cmd(message: types.Message):
 @dp.message(F.photo | F.document | F.audio | F.voice)
 async def handle_files(message: types.Message):
     if not check_chat(message): return
-    txt = message.caption or "Проанализируй медиафайл."
+    txt = message.caption or "Проанализируй медиафайла."
     f_io = io.BytesIO()
     f_info = message.photo[-1] if message.photo else (message.voice if message.voice else (message.audio if message.audio else message.document))
     mime = "image/jpeg" if message.photo else (message.voice.mime_type if message.voice else (message.audio.mime_type if message.audio else message.document.mime_type))
