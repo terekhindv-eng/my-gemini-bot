@@ -77,11 +77,10 @@ async def generate_image_cmd(message: types.Message):
             pass
         return
 
-    # Полностью безопасное извлечение текста промпта без вызова методов над списками
+    # Полностью безопасное разделение текста без вызова .strip() у списков
     image_prompt = ""
-    text_parts = message.text.split(maxsplit=1)
-    if len(text_parts) > 1:
-        image_prompt = text_parts[1].strip()
+    if " " in message.text:
+        image_prompt = message.text.split(" ", 1)[1].strip()
 
     if not image_prompt:
         await message.reply("❌ <b>Вы не ввели описание для картинки!</b>\nПример использования:\n<code>/draw космический город</code>", parse_mode=ParseMode.HTML)
