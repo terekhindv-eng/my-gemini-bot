@@ -35,7 +35,7 @@ TEXT_CONFIG = genai_types.GenerateContentConfig(
     temperature=0.7
 )
 
-# Специальная конфигурация для команды рисования через запуск кода на серверах Google
+# Специальная конфигурация для команды рисования через запуск кода на серверах Google по стандартам нового SDK
 DRAW_CONFIG = genai_types.GenerateContentConfig(
     system_instruction=(
         "Ты — генератор изображений. Твоя единственная задача — написать Python-код "
@@ -44,7 +44,7 @@ DRAW_CONFIG = genai_types.GenerateContentConfig(
         "Используй продвинутую графику, градиенты, геометрические фракталы или пиксель-арт, "
         "чтобы детально отобразить то, что просит пользователь."
     ),
-    tools=[genai_types.Tool(code_execution=genai_types.CodeExecution())],
+    tools=[{'code_execution': {}}],
     temperature=0.3
 )
 
@@ -81,8 +81,8 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
         )
 
         image_bytes = None
-        if response.candidates and response.candidates.content.parts:
-            for part in response.candidates.content.parts:
+        if response.candidates and response.candidates[0].content.parts:
+            for part in response.candidates[0].content.parts:
                 if part.inline_data:
                     image_bytes = part.inline_data.data
                     break
