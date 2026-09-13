@@ -77,7 +77,7 @@ async def generate_image_cmd(message: types.Message):
             pass
         return
 
-    # Полностью безопасное разделение текста без вызова .strip() у списков
+    # Полностью безопасное извлечение промпта без вызова .strip() над массивами
     image_prompt = ""
     if " " in message.text:
         image_prompt = message.text.split(" ", 1)[1].strip()
@@ -100,7 +100,7 @@ async def generate_image_cmd(message: types.Message):
         )
         image_bytes = None
         if result.generated_images:
-            image_bytes = result.generated_images.image.image_bytes
+            image_bytes = result.generated_images[0].image.image_bytes
 
         if not image_bytes:
             await status_msg.edit_text("🔄 Не удалось сгенерировать картинку. Попробуйте другой запрос.")
