@@ -7,11 +7,9 @@ from aiogram.filters import CommandStart, Command
 from aiogram.enums import ParseMode
 from google import genai
 from google.genai import types as genai_types
-from aiohttp import web
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-PORT = int(os.getenv("PORT", "10000"))
 
 try:
     ALLOWED_GROUP = int(os.getenv("TELEGRAM_GROUP_ID", "0").strip())
@@ -24,7 +22,7 @@ ai_client = genai.Client(api_key=GEMINI_KEY)
 
 GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "Вы — официальный ИИ-ассистент Gemini от Google. Ваши ответы должны полностью "
-    "соответствовать стилитике веб-интерфейса Google AI: будьте максимально полезным, "
+    "соответствовать стилистике веб-интерфейса Google AI: будьте максимально полезным, "
     "конкретным, технологичным и точным. Избегайте пространных вступлений и дежурных фраз.\n\n"
     "ПРАВИЛО ФОРМАТИРОВАНИЯ: Тебе КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать символы звездочек (*) "
     "или нижних подчеркиваний (_) для выделения текста. Если тебе нужно сделать текст "
@@ -71,7 +69,6 @@ async def generate_image_cmd(message: types.Message):
             pass
         return
 
-    # Извлечение промпта (обрабатывается строго как текст)
     image_prompt = message.get_args()
     if image_prompt:
         image_prompt = image_prompt.strip()
@@ -215,30 +212,14 @@ async def send_to_gemini(message: types.Message, contents: list):
     except Exception as e:
         await message.reply(f"Ошибка Gemini API: {str(e)}")
 
-async def handle_ping(request):
-    return web.Response(text="Bot is running!")
-
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get("/", handle_ping)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", PORT)
-    await site.start()
-    print(f"Веб-сервер пинга успешно запущен на порту {PORT}")
-
 async def main():
     global BOT_USERNAME, BOT_ID
     bot_info = await bot.get_me()
     BOT_USERNAME = f"@{bot_info.username}"
     BOT_ID = bot_info.id
     
-    # Сбрасываем старые вебхуки, чтобы активировать поллинг
+    # Сбрасываем все старые вебхуки для активации стабильного поллинга
     await bot.delete_webhook(drop_pending_updates=True)
-    
-    # Запускаем легкий веб-сервер для прохождения проверок портов Render.com
-    await start_web_server()
-    
     print(f"Бот {BOT_USERNAME} успешно запущен!")
     await dp.start_polling(bot)
 
