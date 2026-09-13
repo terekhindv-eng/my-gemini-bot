@@ -22,7 +22,8 @@ try:
 except ValueError:
     ALLOWED_GROUP = 0
 
-ALLOWED_USERS = [490524856]  # ОБЯЗАТЕЛЬНО вставьте ваш числовой Telegram ID внутрь скобок!
+# Ваш Telegram ID автоматически вшит в белый список
+ALLOWED_USERS = [490524856]  
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -33,7 +34,7 @@ GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "соответствовать стилистике веб-интерфейса Google AI: будьте максимально полезным, "
     "конкретным, технологичным и точным. Избегайте пространных вступлений и дежурных фраз.\n\n"
     "ПРАВИЛО ФОРМАТИРОВАНИЯ: Тебе КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать символы звездочек (*) "
-    "или нижних подчеркиваний (_) для выделения текста. Если тебе нужно сделать text "
+    "или нижних подчеркиваний (_) для выделения текста. Если тебе нужно сделать текст "
     "ЖИРНЫМ, используй строго теги <b>текст</b>. Если нужен КУРСИВ — используй <i>текст</i>. "
     "Для оформления списков используй стандартные маркеры (например, обычный дефис или точку) "
     "и перенос строки. Пишите в профессиональном, но дружелюбном тоне."
@@ -77,10 +78,10 @@ async def generate_image_cmd(message: types.Message):
             pass
         return
 
-    # Полностью безопасный разбор строки без вызова строковых методов над списками
-    image_prompt = ""
-    if message.text and " " in message.text:
-        image_prompt = message.text.split(" ", 1)[1].strip()
+    # Нативное и на 100% безопасное извлечение аргументов команды
+    image_prompt = message.get_args()
+    if image_prompt:
+        image_prompt = image_prompt.strip()
 
     if not image_prompt:
         await message.reply("❌ <b>Вы не ввели описание для картинки!</b>\nПример использования:\n<code>/draw космический город</code>", parse_mode=ParseMode.HTML)
@@ -98,9 +99,10 @@ async def generate_image_cmd(message: types.Message):
                 aspect_ratio="1:1"
             )
         )
+        
         image_bytes = None
         if result and result.generated_images:
-            image_bytes = result.generated_images[0].image.image_bytes
+            image_bytes = result.generated_images.image.image_bytes
 
         if not image_bytes:
             await status_msg.edit_text("🔄 Не удалось сгенерировать картинку. Попробуйте другой запрос.")
