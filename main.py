@@ -19,7 +19,7 @@ except ValueError:
     ALLOWED_GROUP = 0
 
 # 2. Белый список пользователей для личной переписки
-ALLOWED_USERS = []  # Обязательно вставьте ваш числовой Telegram ID внутрь скобок!
+ALLOWED_USERS = [490524856]  # Обязательно вставьте ваш числовой Telegram ID внутрь скобок!
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
