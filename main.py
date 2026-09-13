@@ -19,7 +19,7 @@ except ValueError:
     ALLOWED_GROUP = 0
 
 # 2. Белый список пользователей для личной переписки
-ALLOWED_USERS = []  # Обязательно укажите ваш числовой ID внутри скобок!
+ALLOWED_USERS = []  # Обязательно вставьте ваш числовой Telegram ID внутрь скобок!
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -28,7 +28,7 @@ genai.configure(api_key=GEMINI_KEY)
 # Стилистика общения Google AI + жесткое требование использовать HTML-теги для форматирования
 GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "Вы — официальный ИИ-ассистент Gemini от Google. Ваши ответы должны полностью "
-    "соответствовать стилистике веб-интерфейса Google AI: будьте максимально полезным, "
+    "соответствовать стилитике веб-интерфейса Google AI: будьте максимально полезным, "
     "конкретным, технологичным и точным. Избегайте пространных вступлений и дежурных фраз.\n\n"
     "ПРАВИЛО ФОРМАТИРОВАНИЯ: Тебе КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать символы звездочек (*) "
     "или нижних подчеркиваний (_) для выделения текста. Если тебе нужно сделать текст "
@@ -43,7 +43,7 @@ model = genai.GenerativeModel(
     system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION
 )
 
-# Локальное хранилище истории, разделенное по ID тем (топиков). Установлен оптимальный лимит в 50 сообщений.
+# Локальное хранилище истории, разделенное по ID тем (топиков). Установлен лимит в 50 сообщений.
 MAX_HISTORY = 50
 chat_history = defaultdict(list)
 
@@ -73,12 +73,10 @@ async def start_cmd(message: types.Message):
 async def generate_image_cmd(message: types.Message):
     current_chat_id = message.chat.id
 
-    # Проверка прав для ЛС
     if message.chat.type == "private" and message.from_user.id not in ALLOWED_USERS:
         await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
         return
 
-    # Защита от чужих групп
     if message.chat.type in ["group", "supergroup"] and current_chat_id != ALLOWED_GROUP:
         try:
             await bot.leave_chat(current_chat_id)
@@ -86,22 +84,17 @@ async def generate_image_cmd(message: types.Message):
             pass
         return
 
-    # Извлекаем текст промпта, идущий после команды
     image_prompt = message.text.split(maxsplit=1)[1].strip() if len(message.text.split()) > 1 else ""
 
     if not image_prompt:
         await message.reply("❌ <b>Вы не ввели описание для картинки!</b>\nПример использования:\n<code>/draw милый рыжий кот в очках космического скафандра</code>", parse_mode=ParseMode.HTML)
         return
 
-    # Отправляем уведомление о начале генерации (так как процесс занимает около 5-10 секунд)
     status_msg = await message.reply("🎨 <i>Генерирую изображение по вашему запросу, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
 
     for attempt in range(3):
         try:
-            # Используем официальную модель Imagen 3
             imagen_model = genai.GenerativeModel("imagen-3.0-generate-002")
-            
-            # Запрашиваем генерацию контента с модальностью "image"
             result = imagen_model.generate_content(
                 f"Generate a high-quality, detailed image based on this description: {image_prompt}",
                 generation_config=genai.types.GenerationConfig(
@@ -109,7 +102,6 @@ async def generate_image_cmd(message: types.Message):
                 )
             )
 
-            # Ищем байты сгенерированного изображения в ответе API
             image_bytes = None
             for candidate in result.candidates:
                 for part in candidate.content.parts:
@@ -121,10 +113,7 @@ async def generate_image_cmd(message: types.Message):
                 await status_msg.edit_text("🔄 Извините, не удалось извлечь изображение из ответа ИИ. Попробуйте изменить формулировку промпта.")
                 return
 
-            # Подготавливаем файл для отправки в Telegram
             input_file = types.BufferedInputFile(image_bytes, filename="generated_image.jpg")
-            
-            # Удаляем временное текстовое сообщение о статусе генерации и присылаем готовое фото
             await bot.delete_message(chat_id=current_chat_id, message_id=status_msg.message_id)
             await message.reply_photo(photo=input_file, caption=f"✨ Готово! Изображение по запросу: <i>{image_prompt}</i>", parse_mode=ParseMode.HTML)
             return
@@ -242,3 +231,16 @@ async def handle_message(message: types.Message):
 
     if (message.chat.type == "private" and message.from_user.id in ALLOWED_USERS) or current_chat_id == ALLOWED_GROUP:
         
+        clean_request = message.text.replace(BOT_USERNAME, "").strip() if message.text else ""
+        if not clean_request:
+            clean_request = message.text
+
+        if message.chat.type != "private" and chat_history[thread_id]:
+            context = "\n".join(chat_history[thread_id])
+            full_prompt = (
+                f"Before you is the history of the last messages from this working chat topic:\n"
+                f"\"\"\"\n{context}\n\"\"\"\n\n"
+                f"Fulfill the user's request based on this chat history: {clean_request}"
+            )
+        else:
+            full_prompt = clean_request
