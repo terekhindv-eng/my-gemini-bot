@@ -16,7 +16,7 @@ PORT = int(os.getenv("PORT", "10000"))
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Инициализируем стандартный клиент Google GenAI (работает на стабильной версии v1)
+# Инициализируем стандартный клиент Google GenAI на стабильной версии v1
 ai_client = genai.Client(api_key=GEMINI_KEY)
 
 GOOGLE_AI_SYSTEM_INSTRUCTION = (
@@ -41,7 +41,7 @@ chat_history = defaultdict(list)
 BOT_USERNAME = ""
 BOT_ID = 0
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Исправленная генерация картинок Imagen 3 без префикса "models/"
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Исправленная генерация картинок по стандартам нового SDK google-genai
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     current_chat_id = message.chat.id
@@ -61,7 +61,7 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
     status_msg = await message.reply("🎨 <i>Генерирую изображение по вашему запросу, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
 
     try:
-        # Убрали префикс 'models/', так как SDK добавляет его автоматически под капотом
+        # Используем точное каноническое имя модели для метода generate_images
         result = ai_client.models.generate_images(
             model='imagen-3.0-generate-002',
             prompt=image_prompt,
