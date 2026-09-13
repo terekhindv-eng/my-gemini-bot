@@ -4,8 +4,7 @@ import asyncio
 from collections import defaultdict
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
-from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode  # Проверьте, что этот импорт присутствует
 import google.generativeai as genai
 from aiohttp import web
 
@@ -18,8 +17,8 @@ try:
 except ValueError:
     ALLOWED_GROUP = 0
 
-# Задача 2: Включаем форматирование Markdown по умолчанию для всех ответов бота
-bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
+# Убираем проблемный DefaultBotProperties и инициализируем бота стандартно
+bot = Bot(token=TOKEN)
 dp = Dispatcher()
 genai.configure(api_key=GEMINI_KEY)
 
@@ -32,7 +31,6 @@ chat_history = []
 BOT_USERNAME = ""
 BOT_ID = 0
 
-# Задача 4: Системная инструкция для точного копирования стиля оригинального Google AI (веб-версии)
 GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "Вы — официальный ИИ-ассистент Gemini от Google. Ваши ответы должны полностью "
     "соответствовать стилистике веб-интерфейса Google AI: будьте максимально полезным, "
@@ -53,13 +51,12 @@ async def start_cmd(message: types.Message):
         
     await message.answer("Привет! Я официальный ассистент Gemini. Чем могу помочь?")
 
-# Задача 3: Создаем хэндлер для обработки фотографий и файлов (документов)
+# Хэндлер для обработки фотографий и файлов (документов)
 @dp.message(F.photo | F.document)
 async def handle_files(message: types.Message):
     global BOT_USERNAME, BOT_ID
     current_chat_id = message.chat.id
 
-    # Защита от чужих групп
     if message.chat.type in ["group", "supergroup"] and current_chat_id != ALLOWED_GROUP:
         try:
             await bot.leave_chat(current_chat_id)
@@ -67,10 +64,8 @@ async def handle_files(message: types.Message):
             pass
         return
 
-    # Извлекаем текст (подпись к фото/файлу)
     user_text = message.caption if message.caption else ""
     
-    # Записываем в общую историю чата для сохранения контекста
     file_type_label = "[Фотография]" if message.photo else "[Документ]"
     if message.chat.type in ["group", "supergroup"]:
         user_name = message.from_user.full_name or "Пользователь"
@@ -78,11 +73,9 @@ async def handle_files(message: types.Message):
         if len(chat_history) > MAX_HISTORY:
             chat_history.pop(0)
 
-    # Скачиваем файл во временный буфер
     file_io = io.BytesIO()
     
     if message.photo:
-        # Берем самое лучшее качество фотографии (последний элемент массива)
         file_info = message.photo[-1]
         mime_type = "image/jpeg"
     else:
@@ -96,7 +89,6 @@ async def handle_files(message: types.Message):
         await message.reply(f"❌ Не удалось загрузить файл: {str(e)}")
         return
 
-    # Структурируем содержимое для Gemini API
     contents = [
         {
             "mime_type": mime_type,
@@ -104,7 +96,6 @@ async def handle_files(message: types.Message):
         }
     ]
 
-    # Формируем запрос с учетом контекста истории
     if message.chat.type != "private" and chat_history:
         context = "\n".join(chat_history)
         prompt_text = (
@@ -117,8 +108,6 @@ async def handle_files(message: types.Message):
         prompt_text = user_text if user_text else "Проанализируй этот файл и детально опиши его содержимое."
 
     contents.append(prompt_text)
-
-    # Отправляем в Gemini с применением настроек стиля
     await send_to_gemini(message, contents)
 
 
@@ -128,7 +117,6 @@ async def handle_message(message: types.Message):
     global BOT_USERNAME, BOT_ID
     current_chat_id = message.chat.id
 
-    # Защита от чужих групп
     if message.chat.type in ["group", "supergroup"] and current_chat_id != ALLOWED_GROUP:
         try:
             await bot.leave_chat(current_chat_id)
@@ -136,22 +124,17 @@ async def handle_message(message: types.Message):
             pass
         return
 
-    # Записываем текущее сообщение в историю
     if message.chat.type in ["group", "supergroup"] and message.text:
         user_name = message.from_user.full_name or "Пользователь"
         chat_history.append(f"{user_name}: {message.text}")
         if len(chat_history) > MAX_HISTORY:
             chat_history.pop(0)
 
-    # Задача 1: Бот теперь отвечает на ВСЕ сообщения в разрешенной группе или в ЛС
     if message.chat.type == "private" or current_chat_id == ALLOWED_GROUP:
-        
-        # Очищаем текст от упоминания бота (если оно было)
         clean_request = message.text.replace(BOT_USERNAME, "").strip() if message.text else ""
         if not clean_request:
             clean_request = message.text
 
-        # Формируем итоговый промпт для текстовой модели
         if message.chat.type != "private" and chat_history:
             context = "\n".join(chat_history)
             full_prompt = (
@@ -169,7 +152,6 @@ async def handle_message(message: types.Message):
 async def send_to_gemini(message: types.Message, contents: list):
     for attempt in range(3):
         try:
-            # Передаем системную инструкцию стиля через конфигурацию запроса
             response = model.generate_content(
                 contents,
                 generation_config=genai.types.GenerationConfig(
@@ -178,12 +160,12 @@ async def send_to_gemini(message: types.Message, contents: list):
                 )
             )
             
-            # Если ответ пустой
             if not response.text:
                 await message.reply("🔄 Извините, не удалось сгенерировать ответ. Попробуйте еще раз.")
                 return
 
-            await message.reply(response.text)
+            # Явно передаем ParseMode.MARKDOWN в метод ответа
+            await message.reply(response.text, parse_mode=ParseMode.MARKDOWN)
             return
             
         except Exception as e:
