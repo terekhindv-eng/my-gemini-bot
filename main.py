@@ -15,7 +15,7 @@ from aiohttp import web
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
-ADMIN_ID = 490524856  # Ваш ID администратора для ЛС
+ADMIN_ID = 490524856  # Ваш подтвержденный ID администратора для ЛС
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -101,26 +101,36 @@ async def handle_files(message: types.Message):
         mime_type = message.document.mime_type or "application/octet-stream"
         file_label = "[Документ]"
 
+    # Сохраняем сообщение в историю для поддержания контекста темы
     if message.chat.type in ["group", "supergroup"]:
         user_name = message.from_user.full_name or "Пользователь"
         chat_history[thread_id].append(f"{user_name}: {file_label} {user_text}")
 
-    try:
-        await bot.download(file_info, destination=file_io)
-        file_bytes = file_io.getvalue()
-    except Exception as e:
-        await message.reply(f"❌ Не удалось загрузить медиафайл: {str(e)}")
-        return
+    # Файлы обрабатываем только если они присланы в ЛС или содержат упоминание бота в подписи
+    is_triggered = (
+        message.chat.type == "private" or 
+        (user_text and BOT_USERNAME.lower() in user_text.lower()) or
+        (user_text and "my_support_gemini_bot" in user_text.lower()) or
+        (message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID)
+    )
 
-    file_part = genai_types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
+    if is_triggered:
+        try:
+            await bot.download(file_info, destination=file_io)
+            file_bytes = file_io.getvalue()
+        except Exception as e:
+            await message.reply(f"❌ Не удалось загрузить медиафайл: {str(e)}")
+            return
 
-    if message.chat.type != "private" and chat_history[thread_id]:
-        context = "\n".join(chat_history[thread_id])
-        prompt_text = f"История последних сообщений в этой теме чата:\n{context}\n\nЗапрос к прикрепленному файлу: {user_text}"
-    else:
-        prompt_text = user_text if user_text else "Проанализируй содержимое этого медиафайла."
+        file_part = genai_types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
 
-    await send_to_gemini(message, [file_part, prompt_text])
+        if message.chat.type != "private" and chat_history[thread_id]:
+            context = "\n".join(chat_history[thread_id])
+            prompt_text = f"История последних сообщений в этой теме чата:\n{context}\n\nЗапрос к прикрепленному файлу: {user_text}"
+        else:
+            prompt_text = user_text if user_text else "Проанализируй содержимое этого медиафайла."
+
+        await send_to_gemini(message, [file_part, prompt_text])
 
 # 3. ТЕКСТОВЫЙ ХЭНДЛЕР
 @dp.message(F.text)
@@ -135,12 +145,17 @@ async def handle_message(message: types.Message):
         user_name = message.from_user.full_name or "Пользователь"
         chat_history[thread_id].append(f"{user_name}: {message.text}")
 
-    # ИСПРАВЛЕНО: Бот реагирует ВСЕГДА (и в ЛС, и на любое сообщение внутри разрешенной группы)
-    is_triggered = True
+    # ВОЗВРАЩЕНО: Бот реагирует в ЛС всегда, а в группе — только на упоминание или ответ (Reply)
+    is_triggered = (
+        message.chat.type == "private" or 
+        (message.text and BOT_USERNAME.lower() in message.text.lower()) or
+        (message.text and "my_support_gemini_bot" in message.text.lower()) or
+        (message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID)
+    )
 
     if is_triggered:
         clean_request = message.text
-        # Очищаем текст от имени бота, если оно всё-таки было указано
+        # Очищаем текст от имени бота, если оно было указано
         if message.text and BOT_USERNAME.lower() in message.text.lower():
             clean_request = re.sub(re.escape(BOT_USERNAME), "", message.text, flags=re.IGNORECASE).strip()
         if "my_support_gemini_bot" in clean_request.lower():
@@ -157,11 +172,11 @@ async def handle_message(message: types.Message):
 
         await send_to_gemini(message, [full_prompt])
 
-# Функция отправки запросов в Google GenAI API
+# Функция отправки запросов в Google GenAI API с моделью gemini-3.1-flash-lite
 async def send_to_gemini(message: types.Message, contents: list):
     try:
         response = ai_client.models.generate_content(
-            model='gemini-3.6-flash',  # Ваша рабочая модель
+            model='gemini-3.1-flash-lite',  # Актуальная модель с 15 запросами в минуту
             contents=contents,
             config=TEXT_CONFIG
         )
@@ -179,7 +194,7 @@ async def send_to_gemini(message: types.Message, contents: list):
     except Exception as e:
         await message.reply(f"Ошибка Gemini API: {str(e)}")
 
-# Web-интерфейс для прохождения проверок портов Render (и пинга от cron-job)
+# Веб-интерфейс для прохождения проверок портов Render (и пинга от cron-job)
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
