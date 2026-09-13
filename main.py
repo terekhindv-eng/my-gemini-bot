@@ -1,4 +1,4 @@
-import os, io, asyncio, threading, http.server, urllib.parse, urllib.request
+import os, io, asyncio, threading, http.server, urllib.parse, httpx
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.enums import ParseMode
@@ -17,30 +17,30 @@ def check_chat(m):
     if m.chat.type in ["group", "supergroup"] and m.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()): return False
     return True
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Безлимитное нативное скачивание в обход квот Google
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Асинхронное скачивание через httpx с идеальной поддержкой UTF-8 (русского языка)
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     if not check_chat(message): return
     if not command.args: return await message.reply("❌ Введите описание! Пример: <code>/draw космос</code>", parse_mode=ParseMode.HTML)
     
-    status_msg = await message.reply("🎨 <i>Генерирую и загружаю изображение, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
+    status_msg = await message.reply("🎨 <i>Генерирую и загружаю изображение высокого разрешения...</i>", parse_mode=ParseMode.HTML)
     try:
         clean_prompt = command.args.strip()
-        # Кодируем текст напрямую для URL, минуя вызовы Gemini
+        # Корректное асинхронное кодирование русского текста для URL
         encoded_prompt = urllib.parse.quote(clean_prompt)
-        
-        # Сборка монолитного пути для скачивания файла
         image_url = f"https://pollinations.ai{encoded_prompt}.jpg?width=1024&height=1024&nologo=true&enhance=true"
         
-        def download_file():
-            req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=30) as response:
-                return response.read()
-                
-        image_bytes = await asyncio.to_thread(download_file)
+        # Скачиваем через httpx — он нативно и без ошибок понимает UTF-8 и любые русские промпты
+        async with httpx.AsyncClient(timeout=40.0, follow_redirects=True) as client:
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            response = await client.get(image_url, headers=headers)
+            
+            if response.status_code != 200:
+                return await status_msg.edit_text(f"🔄 Сервер генерации вернул статус: {response.status_code}. Попробуйте позже.")
+            image_bytes = response.content
 
         if not image_bytes:
-            return await status_msg.edit_text("🔄 Ошибка: не удалось получить данные от сервера генерации.")
+            return await status_msg.edit_text("🔄 Ошибка: не удалось получить данные от сервера.")
 
         input_file = types.BufferedInputFile(image_bytes, filename="generated_image.jpg")
         
