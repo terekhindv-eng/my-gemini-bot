@@ -5,6 +5,7 @@ from collections import defaultdict
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
 from aiogram.enums import ParseMode
+from aiogram.webhook.aiohttp_impl import SimpleRequestHandler, setup_application
 from google import genai
 from google.genai import types as genai_types
 from aiohttp import web
@@ -13,6 +14,10 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
 
+# Ссылка на ваш сервер Render (БЕЗ косой черты на конце)
+WEBHOOK_HOST = "https://onrender.com"
+WEBHOOK_PATH = f"/webhook/{TOKEN}"
+
 # 1. Настройка разрешенной группы
 try:
     ALLOWED_GROUP = int(os.getenv("TELEGRAM_GROUP_ID", "0").strip())
@@ -20,7 +25,7 @@ except ValueError:
     ALLOWED_GROUP = 0
 
 # 2. Белый список пользователей для личной переписки
-ALLOWED_USERS = [490524856]  # ОБЯЗАТЕЛЬНО вставьте ваш числовой Telegram ID внутрь скобок!
+ALLOWED_USERS = []  # ОБЯЗАТЕЛЬНО вставьте ваш числовой Telegram ID внутрь скобок!
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -97,7 +102,6 @@ async def generate_image_cmd(message: types.Message):
 
     for attempt in range(3):
         try:
-            # Генерация картинок через новый клиент на модели Imagen 3
             result = ai_client.models.generate_images(
                 model='imagen-3.0-generate-002',
                 prompt=image_prompt,
@@ -185,7 +189,6 @@ async def handle_files(message: types.Message):
         await message.reply(f"❌ Не удалось загрузить файл: {str(e)}")
         return
 
-    # Структурируем файл под новый формат данных google-genai
     file_part = genai_types.Part.from_bytes(
         data=file_bytes,
         mime_type=mime_type,
@@ -240,6 +243,3 @@ async def handle_message(message: types.Message):
             context = "\n".join(chat_history[thread_id])
             full_prompt = (
                 f"Before you is the history of the last messages from this working chat topic:\n"
-                f"\"\"\"\n{context}\n\"\"\"\n\n"
-                f"Fulfill the user's request based on this chat history: {clean_request}"
-            )
