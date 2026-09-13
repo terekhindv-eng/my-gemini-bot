@@ -1,4 +1,4 @@
-import os, io, asyncio, threading, http.server, urllib.parse, httpx
+import os, io, asyncio, threading, http.server
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.enums import ParseMode
@@ -12,29 +12,49 @@ ai_client = genai.Client(api_key=GEMINI_KEY)
 GOOGLE_AI_SYSTEM_INSTRUCTION = "Вы — official Google Gemini AI. Запрещено использовать (*) или (_) для выделения текста. Если нужно сделать текст ЖИРНЫМ, используй теги <b>текст</b>, КУРСИВ — <i>текст</i>."
 TEXT_CONFIG = genai_types.GenerateContentConfig(system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION, temperature=0.7)
 
+# Специальная конфигурация для генерации графики через запуск кода на серверах Google
+DRAW_CONFIG = genai_types.GenerateContentConfig(
+    system_instruction=(
+        "Ты — генератор изображений. Твоя единственная задача — написать Python-код "
+        "с использованием библиотек matplotlib или PIL, который визуализирует и рисует "
+        "запрос пользователя, а затем сохранить результат в файл 'output.png'. "
+        "Используй продвинутую графику, градиенты, геометрические фракталы или пиксель-арт, "
+        "чтобы детально отобразить то, что просит пользователь."
+    ),
+    tools=[{'code_execution': {}}],
+    temperature=0.3
+)
+
 def check_chat(m): return not (m.chat.type == "private" and m.from_user.id != 490524856) and not (m.chat.type in ["group", "supergroup"] and m.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()))
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Высокоскоростная безлимитная генерация картинок (100% обход блокировок)
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Автономный рендеринг графики силами ИИ Gemini
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     if not check_chat(message): return
     if not command.args: return await message.reply("❌ Введите описание! Пример: <code>/draw космос</code>", parse_mode=ParseMode.HTML)
-    status_msg = await message.reply("🎨 <i>Генерирую изображение высокого разрешения, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
+    status_msg = await message.reply("🎨 <i>Генерирую графику по вашему запросу на серверах Google, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
     try:
-        # Кодируем текст запроса для безопасной передачи в URL
-        encoded_prompt = urllib.parse.quote(command.args.strip())
-        image_url = f"https://pollinations.ai{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true"
-        
-        # Скачиваем сгенерированную картинку напрямую в оперативную память Render
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            response = await client.get(image_url)
-            if response.status_code != 200:
-                return await status_msg.edit_text("🔄 Сервер генерации временно перегружен. Попробуйте позже.")
-            image_bytes = response.content
+        response = ai_client.models.generate_content(
+            model='gemini-3.6-flash',
+            contents=[f"Нарисуй и сохрани в 'output.png': {command.args.strip()}"],
+            config=DRAW_CONFIG
+        )
 
-        input_file = types.BufferedInputFile(image_bytes, filename="generated_image.jpg")
+        image_bytes = None
+        # Извлекаем созданный файл из результатов выполнения кода модели
+        if response.candidates and response.candidates.content.parts:
+            for part in response.candidates.content.parts:
+                if part.inline_data:
+                    image_bytes = part.inline_data.data
+                    break
+
+        if not image_bytes:
+            # Если графика вернулась текстом кода, выводим её в чат
+            return await status_msg.edit_text(f"🤖 <b>Ответ модели:</b>\n{response.text or 'Не удалось построить график.'}")
+
+        input_file = types.BufferedInputFile(image_bytes, filename="generated_image.png")
         await bot.delete_message(message.chat.id, status_msg.message_id)
-        await message.reply_photo(photo=input_file, caption=f"✨ Готово! Запрос: <i>{command.args.strip()}</i>", parse_mode=ParseMode.HTML)
+        await message.reply_photo(photo=input_file, caption=f"✨ Готово! Графический рендер: <i>{command.args.strip()}</i>", parse_mode=ParseMode.HTML)
     except Exception as e: 
         await status_msg.edit_text(f"❌ Ошибка рендеринга:\n<code>{str(e)}</code>", parse_mode=ParseMode.HTML)
 
