@@ -14,14 +14,14 @@ TEXT_CONFIG = genai_types.GenerateContentConfig(system_instruction=GOOGLE_AI_SYS
 
 def check_chat(m): return not (m.chat.type == "private" and m.from_user.id != 490524856) and not (m.chat.type in ["group", "supergroup"] and m.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()))
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Официальная и стабильная генерация картинок через Imagen 3
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Исправленная генерация картинок Imagen 3 без префикса "models/"
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     if not check_chat(message): return
     if not command.args: return await message.reply("❌ Введите описание! Пример: <code>/draw космос</code>", parse_mode=ParseMode.HTML)
     status_msg = await message.reply("🎨 <i>Генерирую изображение через Imagen 3, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
     try:
-        # Официальный синтаксис google-genai SDK 1.x
+        # Передаем только имя модели. SDK сам добавит нужный префикс "models/" под капотом
         result = ai_client.models.generate_images(
             model='imagen-3.0-generate-002',
             prompt=command.args.strip(),
@@ -52,7 +52,7 @@ async def start_cmd(message: types.Message):
 @dp.message(F.photo | F.document | F.audio | F.voice)
 async def handle_files(message: types.Message):
     if not check_chat(message): return
-    txt = message.caption or "Проанализируй медиафайла."
+    txt = message.caption or "Проанализируй медиафайл."
     f_io = io.BytesIO()
     f_info = message.photo[-1] if message.photo else (message.voice if message.voice else (message.audio if message.audio else message.document))
     mime = "image/jpeg" if message.photo else (message.voice.mime_type if message.voice else (message.audio.mime_type if message.audio else message.document.mime_type))
