@@ -39,7 +39,7 @@ chat_history = defaultdict(list)
 BOT_USERNAME = ""
 BOT_ID = 0
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Исправленная модель генерации картинок Imagen 3
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Генерация картинок Imagen 3 (Проверено по официальному SDK)
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     current_chat_id = message.chat.id
@@ -59,7 +59,7 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
     status_msg = await message.reply("🎨 <i>Генерирую изображение по вашему запросу, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
 
     try:
-        # Официальный правильный идентификатор модели для нового SDK google-genai
+        # Строгое использование канонического имени модели Imagen 3
         result = ai_client.models.generate_images(
             model='imagen-3.0-generate-002',
             prompt=image_prompt,
