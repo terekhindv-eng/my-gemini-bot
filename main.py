@@ -94,7 +94,7 @@ async def handle_files(message: types.Message):
         file_label = "[Голосовое сообщение]"
     elif message.audio:
         file_info = message.audio
-        mime_type = "audio/mp3"
+        mime_type = message.audio.mime_type or "audio/mp3"
         file_label = "[Аудиофайл]"
     else:
         file_info = message.document
@@ -135,20 +135,14 @@ async def handle_message(message: types.Message):
         user_name = message.from_user.full_name or "Пользователь"
         chat_history[thread_id].append(f"{user_name}: {message.text}")
 
-    # Триггер срабатывания: ЛС, полное имя @username, имя без @ или Reply на сообщение бота
-    is_triggered = (
-        message.chat.type == "private" or 
-        (message.text and BOT_USERNAME.lower() in message.text.lower()) or
-        (message.text and "my_support_gemini_bot" in message.text.lower()) or
-        (message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID)
-    )
+    # ИСПРАВЛЕНО: Бот реагирует ВСЕГДА (и в ЛС, и на любое сообщение внутри разрешенной группы)
+    is_triggered = True
 
     if is_triggered:
         clean_request = message.text
-        # Удаление полного юзернейма из текста (без учета регистра)
+        # Очищаем текст от имени бота, если оно всё-таки было указано
         if message.text and BOT_USERNAME.lower() in message.text.lower():
             clean_request = re.sub(re.escape(BOT_USERNAME), "", message.text, flags=re.IGNORECASE).strip()
-        # Удаление юзернейма без собачки, если пользователь написал его так
         if "my_support_gemini_bot" in clean_request.lower():
             clean_request = re.sub("my_support_gemini_bot", "", clean_request, flags=re.IGNORECASE).strip()
 
@@ -163,11 +157,11 @@ async def handle_message(message: types.Message):
 
         await send_to_gemini(message, [full_prompt])
 
-# Функция отправки запросов в Google GenAI API с корректным именем модели
+# Функция отправки запросов в Google GenAI API
 async def send_to_gemini(message: types.Message, contents: list):
     try:
         response = ai_client.models.generate_content(
-            model='gemini-3.6-flash',  # Полное системное имя актуальной и доступной модели 
+            model='gemini-3.6-flash',  # Ваша рабочая модель
             contents=contents,
             config=TEXT_CONFIG
         )
@@ -185,7 +179,7 @@ async def send_to_gemini(message: types.Message, contents: list):
     except Exception as e:
         await message.reply(f"Ошибка Gemini API: {str(e)}")
 
-# Веб-интерфейс для прохождения проверок портов Render (и пинга от cron-job)
+# Web-интерфейс для прохождения проверок портов Render (и пинга от cron-job)
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
