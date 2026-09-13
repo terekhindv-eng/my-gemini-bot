@@ -145,7 +145,7 @@ async def handle_message(message: types.Message):
         user_name = message.from_user.full_name or "Пользователь"
         chat_history[thread_id].append(f"{user_name}: {message.text}")
 
-    # Бот реагирует в ЛС всегда, а в группе — только на упоминание или ответ (Reply)
+    # ВОЗВРАЩЕНО: Бот реагирует в ЛС всегда, а в группе — только на упоминание или ответ (Reply)
     is_triggered = (
         message.chat.type == "private" or 
         (message.text and BOT_USERNAME.lower() in message.text.lower()) or
@@ -176,7 +176,7 @@ async def handle_message(message: types.Message):
 async def send_to_gemini(message: types.Message, contents: list):
     try:
         response = ai_client.models.generate_content(
-            model='gemini-3.1-flash-lite',  # Актуальная стабильная модель
+            model='gemini-3.1-flash-lite',  # Актуальная модель с 15 запросами в минуту
             contents=contents,
             config=TEXT_CONFIG
         )
@@ -198,7 +198,6 @@ async def send_to_gemini(message: types.Message, contents: list):
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
-# ПОЛНЫЙ КОРРЕКТНЫЙ ФИНАЛ КОДА:
 async def main():
     global BOT_USERNAME, BOT_ID
     bot_info = await bot.get_me()
