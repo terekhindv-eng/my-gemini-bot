@@ -19,7 +19,7 @@ ai_client = genai.Client(api_key=GEMINI_KEY)
 
 GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "Вы — официальный ИИ-ассистент Gemini от Google. Ваши ответы должны полностью "
-    "соответствовать стилитике веб-интерфейса Google AI: будьте максимально полезным, "
+    "соответствовать стилистике веб-интерфейса Google AI: будьте максимально полезным, "
     "конкретным, технологичным и точным. Избегайте пространных вступлений и дежурных фраз.\n\n"
     "ПРАВИЛО ФОРМАТИРОВАНИЯ: Тебе КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать символы звездочек (*) "
     "или нижних подчеркиваний (_) для выделения текста. Если тебе нужно сделать текст "
@@ -39,7 +39,7 @@ chat_history = defaultdict(list)
 BOT_USERNAME = ""
 BOT_ID = 0
 
-# 1. ПРИОРИТЕТНЫЙ ХЭНДЛЕР: Команда генерации изображений
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Генерация картинок (Наивысший приоритет)
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message):
     current_chat_id = message.chat.id
@@ -48,7 +48,7 @@ async def generate_image_cmd(message: types.Message):
     if message.chat.type in ["group", "supergroup"] and message.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()):
         return
 
-    # Нативное и безопасное извлечение аргументов команды
+    # Нативное и полностью безопасное извлечение аргументов команды
     image_prompt = message.get_args()
     if image_prompt:
         image_prompt = image_prompt.strip()
@@ -72,7 +72,7 @@ async def generate_image_cmd(message: types.Message):
         
         image_bytes = None
         if result and result.generated_images:
-            image_bytes = result.generated_images[0].image.image_bytes
+            image_bytes = result.generated_images.image.image_bytes
 
         if not image_bytes:
             await status_msg.edit_text("🔄 Не удалось сгенерировать картинку. Попробуйте другой запрос.")
@@ -83,7 +83,6 @@ async def generate_image_cmd(message: types.Message):
         await message.reply_photo(photo=input_file, caption=f"✨ Готово! Запрос: <i>{image_prompt}</i>", parse_mode=ParseMode.HTML)
     except Exception as e:
         await status_msg.edit_text(f"❌ Ошибка генерации: {str(e)}")
-
 
 # 2. Хэндлер команды /start
 @dp.message(CommandStart())
@@ -99,8 +98,7 @@ async def start_cmd(message: types.Message):
         return
     await message.answer("Привет! Я официальный ассистент Gemini. Чем могу помочь?")
 
-
-# 3. Хэндлер медиафайлов, документов и аудио
+# 3. Хэндлер входящих файлов и документов
 @dp.message(F.photo | F.document | F.audio | F.voice)
 async def handle_files(message: types.Message):
     global BOT_USERNAME, BOT_ID
@@ -154,7 +152,6 @@ async def handle_files(message: types.Message):
 
     await send_to_gemini(message, [file_part, prompt_text])
 
-
 # 4. Хэндлер обычных текстовых сообщений
 @dp.message(F.text)
 async def handle_message(message: types.Message):
@@ -185,7 +182,6 @@ async def handle_message(message: types.Message):
             full_prompt = clean_request
 
         await send_to_gemini(message, [full_prompt])
-
 
 async def send_to_gemini(message: types.Message, contents: list):
     try:
