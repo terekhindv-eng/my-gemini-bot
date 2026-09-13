@@ -1,10 +1,11 @@
 import os
 import io
 import asyncio
-from collections import defaultdict
+from collections import defaultdict, deque
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
 from aiogram.enums import ParseMode
+from aiogram.utils.markdown import html_decoration as hd
 from google import genai
 from google.genai import types as genai_types
 from aiohttp import web
@@ -12,6 +13,7 @@ from aiohttp import web
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
+ADMIN_ID = 490524856  # Ваш Telegram ID
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -19,7 +21,7 @@ ai_client = genai.Client(api_key=GEMINI_KEY)
 
 GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "Вы — официальный ИИ-ассистент Gemini от Google. Ваши ответы должны полностью "
-    "соответствовать стилитике веб-интерфейса Google AI: будьте максимально полезным, "
+    "соответствовать стилистике веб-интерфейса Google AI: будьте максимально полезным, "
     "конкретным, технологичным и точным. Избегайте пространных вступлений и дежурных фраз.\n\n"
     "ПРАВИЛО ФОРМАТИРОВАНИЯ: Тебе КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать символы звездочек (*) "
     "или нижних подчеркиваний (_) для выделения текста. Если тебе нужно сделать текст "
@@ -33,18 +35,24 @@ TEXT_CONFIG = genai_types.GenerateContentConfig(
     temperature=0.7
 )
 
-# Хранилище контекста: структура dict, разделенная по ID тем (message_thread_id)
+# Оптимизированное хранилище контекста с автоматическим лимитом длины (защита от утечки памяти)
 MAX_HISTORY = 50
-chat_history = defaultdict(list)
+chat_history = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
 
 BOT_USERNAME = ""
 BOT_ID = 0
 
 # Функция строгой проверки доступа к чатам и личке
 def check_chat(message: types.Message) -> bool:
-    if message.chat.type == "private" and message.from_user.id != 490524856:
+    if message.chat.type == "private" and message.from_user.id != ADMIN_ID:
         return False
-    if message.chat.type in ["group", "supergroup"] and message.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()):
+    
+    try:
+        allowed_group_id = int(os.getenv("TELEGRAM_GROUP_ID", "0").strip())
+    except ValueError:
+        allowed_group_id = 0
+
+    if message.chat.type in ["group", "supergroup"] and message.chat.id != allowed_group_id:
         return False
     return True
 
@@ -53,22 +61,23 @@ def check_chat(message: types.Message) -> bool:
 async def start_cmd(message: types.Message):
     if not check_chat(message):
         if message.chat.type in ["group", "supergroup"]:
-            try: await bot.leave_chat(message.chat.id)
-            except Exception: pass
+            try: 
+                await bot.leave_chat(message.chat.id)
+            except Exception: 
+                pass
         return
-    await message.answer("Привет! Я официальный мультимодальный ассистент Gemini 3.6. Я умею анализировать текст, фото, видео, аудио файлы и помнить контекст беседы.")
+    await message.answer("Привет! Я официальный мультимодальный ассистент Gemini. Я умею анализировать текст, фото, видео, аудио файлы и помнить контекст беседы.")
 
-# 2. МУЛЬТИМОДАЛЬНЫЙ ХЭНДЛЕР: Анализ фото, видео, документов, аудио и голосовых сообщений
+# 2. МУЛЬТИМОДАЛЬНЫЙ ХЭНДЛЕР
 @dp.message(F.photo | F.video | F.document | F.audio | F.voice)
 async def handle_files(message: types.Message):
-    global BOT_USERNAME, BOT_ID
-    if not check_chat(message): return
+    if not check_chat(message): 
+        return
 
     user_text = message.caption if message.caption else ""
     file_io = io.BytesIO()
     thread_id = message.message_thread_id or 0
     
-    # Автоматическое определение типа медиафайла и выставление Mime-Type
     if message.photo:
         file_info = message.photo[-1]
         mime_type = "image/jpeg"
@@ -90,14 +99,10 @@ async def handle_files(message: types.Message):
         mime_type = message.document.mime_type or "application/octet-stream"
         file_label = "[Документ]"
 
-    # Запись отправленного файла в контекст конкретной темы чата
     if message.chat.type in ["group", "supergroup"]:
         user_name = message.from_user.full_name or "Пользователь"
         chat_history[thread_id].append(f"{user_name}: {file_label} {user_text}")
-        if len(chat_history[thread_id]) > MAX_HISTORY:
-            chat_history[thread_id].pop(0)
 
-    # Скачивание файла в оперативную память хостинга
     try:
         await bot.download(file_info, destination=file_io)
         file_bytes = file_io.getvalue()
@@ -105,10 +110,8 @@ async def handle_files(message: types.Message):
         await message.reply(f"❌ Не удалось загрузить медиафайл: {str(e)}")
         return
 
-    # Упаковка байт в объект Part для передачи в Google GenAI API
     file_part = genai_types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
 
-    # Формирование промпта с учетом накопленной истории темы
     if message.chat.type != "private" and chat_history[thread_id]:
         context = "\n".join(chat_history[thread_id])
         prompt_text = f"История последних сообщений в этой теме чата:\n{context}\n\nЗапрос к прикрепленному файлу: {user_text}"
@@ -117,30 +120,32 @@ async def handle_files(message: types.Message):
 
     await send_to_gemini(message, [file_part, prompt_text])
 
-# 3. ТЕКСТОВЫЙ ХЭНДЛЕР: Анализ текстовых запросов и сохранение истории
+# 3. ТЕКСТОВЫЙ ХЭНДЛЕР
 @dp.message(F.text)
 async def handle_message(message: types.Message):
     global BOT_USERNAME, BOT_ID
-    if not check_chat(message): return
+    if not check_chat(message): 
+        return
 
     thread_id = message.message_thread_id or 0
 
-    # Добавление текстового сообщения в историю конкретной темы чата
     if message.chat.type in ["group", "supergroup"] and message.text:
         user_name = message.from_user.full_name or "Пользователь"
         chat_history[thread_id].append(f"{user_name}: {message.text}")
-        if len(chat_history[thread_id]) > MAX_HISTORY:
-            chat_history[thread_id].pop(0)
 
-    # Ответ на запрос (в личке отвечает всегда, в группе — при упоминании или ответе на его сообщение)
     is_triggered = (
         message.chat.type == "private" or 
-        (message.text and BOT_USERNAME in message.text) or 
+        (message.text and BOT_USERNAME.lower() in message.text.lower()) or 
         (message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID)
     )
 
     if is_triggered:
-        clean_request = message.text.replace(BOT_USERNAME, "").strip() if message.text else ""
+        # Умная очистка упоминания бота без привязки к регистру
+        clean_request = message.text
+        if message.text and BOT_USERNAME.lower() in message.text.lower():
+            import re
+            clean_request = re.sub(re.escape(BOT_USERNAME), "", message.text, flags=re.IGNORECASE).strip()
+
         if not clean_request:
             clean_request = message.text
 
@@ -152,11 +157,11 @@ async def handle_message(message: types.Message):
 
         await send_to_gemini(message, [full_prompt])
 
-# Функция отправки запроса в Google GenAI API с моделью 3.6
+# Функция отправки запроса в Gemini API
 async def send_to_gemini(message: types.Message, contents: list):
     try:
         response = ai_client.models.generate_content(
-            model='gemini-3.6-flash',
+            model='gemini-2.5-flash', # Рекомендуется использовать стабильную актуальную модель (например, gemini-2.5-flash)
             contents=contents,
             config=TEXT_CONFIG
         )
@@ -164,12 +169,19 @@ async def send_to_gemini(message: types.Message, contents: list):
             await message.reply("🔄 Не удалось получить ответ от модели. Попробуйте снова.")
             return
         
-        raw_text = response.text.replace("**", "")
-        await message.reply(raw_text, parse_mode=ParseMode.HTML)
+        # Очистка от возможных остаточных Markdown-звездочек
+        raw_text = response.text.replace("**", "").replace("* ", "- ")
+        
+        # Отправляем ответ. Если разметка некорректна, отправляем как обычный экранированный текст
+        try:
+            await message.reply(raw_text, parse_mode=ParseMode.HTML)
+        except Exception:
+            await message.reply(hd.quote(raw_text), parse_mode=ParseMode.HTML)
+            
     except Exception as e:
         await message.reply(f"Ошибка Gemini API: {str(e)}")
 
-# Легковесный хэндлер пинга для прохождения проверок Render портов
+# Хэндлер пинга для Render
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
@@ -181,6 +193,7 @@ async def main():
     
     await bot.delete_webhook(drop_pending_updates=True)
     
+    # Правильный запуск веб-сервера aiohttp в фоне, чтобы он не блокировал Поллинг
     app = web.Application()
     app.router.add_get("/", handle_ping)
     runner = web.AppRunner(app)
@@ -188,7 +201,9 @@ async def main():
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
     
-    print(f"Бот {BOT_USERNAME} успешно запущен!")
+    print(f"Бот {BOT_USERNAME} успешно запущен на порту {PORT}!")
+    
+    # Запуск основного цикла получения сообщений Telegram
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
