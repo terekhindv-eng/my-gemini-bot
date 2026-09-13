@@ -22,7 +22,7 @@ try:
 except ValueError:
     ALLOWED_GROUP = 0
 
-# Ваш Telegram ID автоматически вшит в белый список
+# Ваш Telegram ID автоматически прописан в белый список
 ALLOWED_USERS = [490524856]  
 
 bot = Bot(token=TOKEN)
@@ -78,10 +78,10 @@ async def generate_image_cmd(message: types.Message):
             pass
         return
 
-    # Нативное и на 100% безопасное извлечение аргументов команды
-    image_prompt = message.get_args()
-    if image_prompt:
-        image_prompt = image_prompt.strip()
+    # Полностью безопасный разбор строки без вызова строковых методов над списками
+    image_prompt = ""
+    if message.text and " " in message.text:
+        image_prompt = message.text.split(" ", 1)[1].strip()
 
     if not image_prompt:
         await message.reply("❌ <b>Вы не ввели описание для картинки!</b>\nПример использования:\n<code>/draw космический город</code>", parse_mode=ParseMode.HTML)
@@ -99,10 +99,9 @@ async def generate_image_cmd(message: types.Message):
                 aspect_ratio="1:1"
             )
         )
-        
         image_bytes = None
         if result and result.generated_images:
-            image_bytes = result.generated_images.image.image_bytes
+            image_bytes = result.generated_images[0].image.image_bytes
 
         if not image_bytes:
             await status_msg.edit_text("🔄 Не удалось сгенерировать картинку. Попробуйте другой запрос.")
