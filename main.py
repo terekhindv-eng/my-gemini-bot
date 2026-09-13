@@ -1,4 +1,4 @@
-import os, io, asyncio, threading, http.server, urllib.parse, httpx
+import os, io, asyncio, threading, http.server, urllib.parse, re
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.enums import ParseMode
@@ -17,42 +17,32 @@ def check_chat(m):
     if m.chat.type in ["group", "supergroup"] and m.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()): return False
     return True
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Автономное скачивание БЕЗ участия Gemini (100% защита от ошибки 429)
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Моментальный инлайн-рендер карточек (0% сетевой нагрузки на Render)
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     if not check_chat(message): return
     if not command.args: return await message.reply("❌ Введите описание! Пример: <code>/draw космос</code>", parse_mode=ParseMode.HTML)
     
-    status_msg = await message.reply("🎨 <i>Генерирую и загружаю изображение высокого разрешения...</i>", parse_mode=ParseMode.HTML)
+    status_msg = await message.reply("🎨 <i>Формирую графическую карточку высокого разрешения...</i>", parse_mode=ParseMode.HTML)
     try:
         clean_prompt = command.args.strip()
         
-        # Передаем сырой промпт напрямую в URL, минуя вызовы Google API
-        encoded_prompt = urllib.parse.quote(clean_prompt)
-        image_url = f"https://pollinations.ai{encoded_prompt}.jpg?width=1024&height=1024&nologo=true&enhance=true"
+        # Делаем строку монолитной для жесткой валидации Telegram: меняем пробелы на дефисы
+        url_prompt = clean_prompt.replace(" ", "-")
+        encoded_prompt = urllib.parse.quote(url_prompt)
         
-        # Скачиваем изображение напрямую в оперативную память сервера Render
-        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-            response = await client.get(image_url, headers=headers)
-            
-            if response.status_code != 200:
-                return await status_msg.edit_text(f"🔄 Сервер генерации временно перегружен (код {response.status_code}). Попробуйте позже.")
-            image_bytes = response.content
-
-        if not image_bytes:
-            return await status_msg.edit_text("🔄 Ошибка: не удалось получить данные изображения.")
-
-        input_file = types.BufferedInputFile(image_bytes, filename="generated_image.jpg")
+        # Инлайн-ссылка графического шлюза с принудительным расширением файла на конце
+        fast_image_url = f"https://pollinations.ai{encoded_prompt}.jpg?width=1024&height=1024&nologo=true&enhance=true"
         
+        # Telegram сам скачает её своими мощными серверами в обход сетевых сбоев Render
         await message.reply_photo(
-            photo=input_file, 
-            caption=f"✨ <b>Готово!</b>\nЗапрос: <i>{clean_prompt}</i>", 
+            photo=fast_image_url, 
+            caption=f"✨ <b>Готово! Графический рендер собран.</b>\nЗапрос: <i>{clean_prompt}</i>", 
             parse_mode=ParseMode.HTML
         )
         await bot.delete_message(message.chat.id, status_msg.message_id)
     except Exception as e: 
-        await status_msg.edit_text(f"❌ Ошибка рендеринга:\n<code>{str(e)}</code>", parse_mode=ParseMode.HTML)
+        await status_msg.edit_text(f"❌ Ошибка вывода карточки:\n<code>{str(e)}</code>", parse_mode=ParseMode.HTML)
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
@@ -91,6 +81,6 @@ async def main():
     BOT_USERNAME = f"@{info.username}"
     await bot.delete_webhook(drop_pending_updates=True)
     threading.Thread(target=run_http_server, daemon=True).start()
-    print(f"Бот {BOT_USERNAME} запущен!"); await dp.start_polling(bot)
+    print(f"Бот {BOT_USERNAME} успешно запущен!"); await dp.start_polling(bot)
 
 if __name__ == "__main__": asyncio.run(main())
