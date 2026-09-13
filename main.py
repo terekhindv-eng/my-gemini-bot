@@ -39,7 +39,7 @@ chat_history = defaultdict(list)
 BOT_USERNAME = ""
 BOT_ID = 0
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Генерация картинок по стандартам aiogram 3.x
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Генерация картинок (Актуальное имя модели Imagen 3)
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     current_chat_id = message.chat.id
@@ -48,7 +48,6 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
     if message.chat.type in ["group", "supergroup"] and message.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()):
         return
 
-    # Правильное извлечение аргументов в aiogram 3.x
     image_prompt = command.args
     if image_prompt:
         image_prompt = image_prompt.strip()
@@ -60,6 +59,7 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
     status_msg = await message.reply("🎨 <i>Генерирую изображение по вашему запросу, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
 
     try:
+        # Используем актуальный короткий идентификатор модели
         result = ai_client.models.generate_images(
             model='imagen-3.0-generate-002',
             prompt=image_prompt,
@@ -72,7 +72,7 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
         
         image_bytes = None
         if result and result.generated_images:
-            image_bytes = result.generated_images.image.image_bytes
+            image_bytes = result.generated_images[0].image.image_bytes
 
         if not image_bytes:
             await status_msg.edit_text("🔄 Не удалось сгенерировать картинку. Попробуйте другой запрос.")
