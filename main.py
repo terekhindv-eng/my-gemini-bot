@@ -1,4 +1,4 @@
-import os, io, asyncio, threading, http.server, urllib.parse, re
+import os, io, asyncio, threading, http.server, urllib.parse, httpx
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.enums import ParseMode
@@ -12,46 +12,55 @@ ai_client = genai.Client(api_key=GEMINI_KEY)
 GOOGLE_AI_SYSTEM_INSTRUCTION = "Вы — official Google Gemini AI. Запрещено использовать (*) или (_) для выделения текста. Если нужно сделать текст ЖИРНЫМ, используй теги <b>текст</b>, КУРСИВ — <i>текст</i>."
 TEXT_CONFIG = genai_types.GenerateContentConfig(system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION, temperature=0.7)
 
-# ИСПРАВЛЕНО: Чистое и корректное имя переменной окружения TELEGRAM_GROUP_ID
 def check_chat(m): 
     if m.chat.type == "private" and m.from_user.id != 490524856: return False
     if m.chat.type in ["group", "supergroup"] and m.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()): return False
     return True
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Высокоскоростной инлайн-рендер карточек без внешних скачиваний
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Гарантированное скачивание байт в память Render и отправка файла в Telegram
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     if not check_chat(message): return
     if not command.args: return await message.reply("❌ Введите описание! Пример: <code>/draw космос</code>", parse_mode=ParseMode.HTML)
     
-    status_msg = await message.reply("🎨 <i>Формирую графическую карточку высокого разрешения...</i>", parse_mode=ParseMode.HTML)
+    status_msg = await message.reply("🎨 <i>Генерирую и загружаю изображение высокого разрешения, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
     try:
         clean_prompt = command.args.strip()
         
-        # Переводим запрос на английский язык силами Gemini для стабильности URL
+        # Переводим запрос на английский язык силами Gemini для стабильности генерации
         translate_res = ai_client.models.generate_content(
             model='gemini-3.6-flash',
             contents=[f"Translate this prompt to English for image generation, output ONLY the translation, no other text: {clean_prompt}"]
         )
         en_prompt = translate_res.text.strip() if translate_res.text else clean_prompt
         
-        # Очищаем строку от пробелов и спецсимволов для железобетонной валидации в Telegram
-        safe_prompt = "".join(c if c.isalnum() else "-" for c in en_prompt)
-        safe_prompt = re.sub(r'-+', '-', safe_prompt).strip('-')
-        encoded_prompt = urllib.parse.quote(safe_prompt)
+        # Подготовка безопасного URL
+        encoded_prompt = urllib.parse.quote(en_prompt)
+        image_url = f"https://pollinations.ai{encoded_prompt}.jpg?width=1024&height=1024&nologo=true&enhance=true"
         
-        # Каноническая ссылка графического шлюза с расширением файла на конце
-        fast_image_url = f"https://pollinations.ai{encoded_prompt}.jpg?width=1024&height=1024&nologo=true"
+        # Скачиваем изображение напрямую в оперативную память сервера Render
+        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            response = await client.get(image_url, headers=headers)
+            
+            if response.status_code != 200:
+                return await status_msg.edit_text(f"🔄 Сервер генерации перегружен (статус {response.status_code}). Попробуйте еще раз.")
+            image_bytes = response.content
+
+        if not image_bytes:
+            return await status_msg.edit_text("🔄 Ошибка: не удалось получить данные изображения.")
+
+        # Упаковываем байты в BufferedInputFile и отправляем как полноценный локальный медиафайл
+        input_file = types.BufferedInputFile(image_bytes, filename="generated_image.jpg")
         
-        # Передаем ссылку напрямую в Telegram — мессенджер скачает её своими дата-центрами
         await message.reply_photo(
-            photo=fast_image_url, 
-            caption=f"✨ <b>Готово! Графический рендер собран.</b>\nЗапрос: <i>{clean_prompt}</i>", 
+            photo=input_file, 
+            caption=f"✨ <b>Готово!</b>\nЗапрос: <i>{clean_prompt}</i>", 
             parse_mode=ParseMode.HTML
         )
         await bot.delete_message(message.chat.id, status_msg.message_id)
     except Exception as e: 
-        await status_msg.edit_text(f"❌ Ошибка вывода карточки:\n<code>{str(e)}</code>", parse_mode=ParseMode.HTML)
+        await status_msg.edit_text(f"❌ Ошибка рендеринга:\n<code>{str(e)}</code>", parse_mode=ParseMode.HTML)
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
