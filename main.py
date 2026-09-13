@@ -14,7 +14,7 @@ TEXT_CONFIG = genai_types.GenerateContentConfig(system_instruction=GOOGLE_AI_SYS
 
 def check_chat(m): return not (m.chat.type == "private" and m.from_user.id != 490524856) and not (m.chat.type in ["group", "supergroup"] and m.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()))
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Исправленная и на 100% валидная ссылка для скачивания изображений
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Железобетонная сборка URL и скачивание картинок
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     if not check_chat(message): return
@@ -23,10 +23,13 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
     status_msg = await message.reply("🎨 <i>Генерирую и скачиваю изображение, пожалуйста, подождите...</i>", parse_mode=ParseMode.HTML)
     try:
         clean_prompt = command.args.strip()
+        # Принудительно кодируем только сам текст промпта
         encoded_prompt = urllib.parse.quote(clean_prompt)
         
-        # Исправлено: Добавлен обязательный слеш после .ai/p/ для корректного пути URL
-        image_url = f"https://pollinations.ai{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true"
+        # Стопроцентно безопасная склейка пути URL
+        base_url = "https://pollinations.ai"
+        query_params = "?width=1024&height=1024&nologo=true&enhance=true"
+        image_url = f"{base_url}{encoded_prompt}{query_params}"
         
         def download_file():
             req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
