@@ -1,4 +1,4 @@
-import os, io, asyncio, threading, http.server, urllib.parse
+import os, io, asyncio, threading, http.server, urllib.parse, re
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.enums import ParseMode
@@ -12,7 +12,11 @@ ai_client = genai.Client(api_key=GEMINI_KEY)
 GOOGLE_AI_SYSTEM_INSTRUCTION = "Вы — official Google Gemini AI. Запрещено использовать (*) или (_) для выделения текста. Если нужно сделать текст ЖИРНЫМ, используй теги <b>текст</b>, КУРСИВ — <i>текст</i>."
 TEXT_CONFIG = genai_types.GenerateContentConfig(system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION, temperature=0.7)
 
-def check_chat(m): return not (m.chat.type == "private" and m.from_user.id != 490524856) and not (m.chat.type in ["group", "supergroup"] and m.chat.id != int(os.getenv("TELEgetenvGRAPH_GROUP_ID", "0").strip()))
+# ИСПРАВЛЕНО: Чистое и корректное имя переменной окружения TELEGRAM_GROUP_ID
+def check_chat(m): 
+    if m.chat.type == "private" and m.from_user.id != 490524856: return False
+    if m.chat.type in ["group", "supergroup"] and m.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()): return False
+    return True
 
 # 1. ГЛАВНЫЙ ХЭНДЛЕР: Высокоскоростной инлайн-рендер карточек без внешних скачиваний
 @dp.message(Command("draw", "рендери"))
@@ -24,7 +28,7 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
     try:
         clean_prompt = command.args.strip()
         
-        # Переводим запрос на английский язык силами Gemini для улучшения качества генерации и стабильности URL
+        # Переводим запрос на английский язык силами Gemini для стабильности URL
         translate_res = ai_client.models.generate_content(
             model='gemini-3.6-flash',
             contents=[f"Translate this prompt to English for image generation, output ONLY the translation, no other text: {clean_prompt}"]
@@ -36,7 +40,7 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
         safe_prompt = re.sub(r'-+', '-', safe_prompt).strip('-')
         encoded_prompt = urllib.parse.quote(safe_prompt)
         
-        # Каноническая ссылка графического шлюза Pollinations с принудительным расширением файла на конце
+        # Каноническая ссылка графического шлюза с расширением файла на конце
         fast_image_url = f"https://pollinations.ai{encoded_prompt}.jpg?width=1024&height=1024&nologo=true"
         
         # Передаем ссылку напрямую в Telegram — мессенджер скачает её своими дата-центрами
@@ -82,7 +86,6 @@ def run_http_server():
 
 async def main():
     global BOT_USERNAME
-    import re
     info = await bot.get_me()
     BOT_USERNAME = f"@{info.username}"
     await bot.delete_webhook(drop_pending_updates=True)
