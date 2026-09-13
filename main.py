@@ -14,7 +14,7 @@ TEXT_CONFIG = genai_types.GenerateContentConfig(system_instruction=GOOGLE_AI_SYS
 
 def check_chat(m): return not (m.chat.type == "private" and m.from_user.id != 490524856) and not (m.chat.type in ["group", "supergroup"] and m.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()))
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Моментальный инлайн-рендеринг картинок через защищенные сервера Telegram
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Инлайн-рендеринг картинок со строгой валидацией URL для Telegram
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     if not check_chat(message): return
@@ -22,14 +22,13 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
     
     status_msg = await message.reply("🎨 <i>Формирую высокоскоростной графический рендер карточки...</i>", parse_mode=ParseMode.HTML)
     try:
-        # Кодируем текст запроса по стандартам разметки
         clean_prompt = command.args.strip()
         encoded_prompt = urllib.parse.quote(clean_prompt)
         
-        # Защищенный скоростной инлайн-адрес генерации изображений
-        fast_image_url = f"https://pollinations.ai{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true"
+        # Добавлен параметр &file=.png в самый конец ссылки для прохождения строгой валидации серверов Telegram
+        fast_image_url = f"https://pollinations.ai{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true&file=.png"
         
-        # Отправляем фото по прямой ссылке. Telegram сам скачает её своими мощными дата-центрами в обход сетевых сбоев Render
+        # Отправляем фото по ссылке напрямую через мощные сервера Telegram
         await message.reply_photo(
             photo=fast_image_url, 
             caption=f"✨ <b>Готово! Графический рендер собран.</b>\nЗапрос: <i>{clean_prompt}</i>", 
