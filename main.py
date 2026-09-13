@@ -11,11 +11,11 @@ from google import genai
 from google.genai import types as genai_types
 from aiohttp import web
 
-# Загрузка переменных окружения из настроек Render
+# Загрузка конфигурации из Environment Variables на Render
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
-ADMIN_ID = 490524856  # Ваш личный Telegram ID
+ADMIN_ID = 490524856  # Ваш подтвержденный ID администратора для ЛС
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -46,7 +46,7 @@ BOT_ID = 0
 
 # Функция строгой проверки доступа к чатам и личке
 def check_chat(message: types.Message) -> bool:
-    # 1. Проверка личных сообщений (только для вашего ADMIN_ID)
+    # 1. Проверка личных сообщений (только для ADMIN_ID)
     if message.chat.type == "private" and message.from_user.id != ADMIN_ID:
         return False
     
@@ -65,10 +65,8 @@ def check_chat(message: types.Message) -> bool:
 async def start_cmd(message: types.Message):
     if not check_chat(message):
         if message.chat.type in ["group", "supergroup"]:
-            try: 
-                await bot.leave_chat(message.chat.id)
-            except Exception: 
-                pass
+            try: await bot.leave_chat(message.chat.id)
+            except Exception: pass
         return
     await message.answer("Привет! Я официальный мультимодальный ассистент Gemini. Я умею анализировать текст, фото, видео, аудио файлы и помнить контекст беседы.")
 
@@ -103,7 +101,6 @@ async def handle_files(message: types.Message):
         mime_type = message.document.mime_type or "application/octet-stream"
         file_label = "[Документ]"
 
-    # Сохраняем факт отправки файла в историю для контекста группы
     if message.chat.type in ["group", "supergroup"]:
         user_name = message.from_user.full_name or "Пользователь"
         chat_history[thread_id].append(f"{user_name}: {file_label} {user_text}")
@@ -134,23 +131,26 @@ async def handle_message(message: types.Message):
 
     thread_id = message.message_thread_id or 0
 
-    # Записываем все сообщения группы в историю (для памяти контекста)
     if message.chat.type in ["group", "supergroup"] and message.text:
         user_name = message.from_user.full_name or "Пользователь"
         chat_history[thread_id].append(f"{user_name}: {message.text}")
 
-    # Бот отвечает в ЛС всегда, а в группе — только на упоминание или ответ на его сообщение
+    # Бот реагирует в ЛС всегда, в группе — на полное имя, имя без @ или на ответ (Reply)
     is_triggered = (
         message.chat.type == "private" or 
-        (message.text and BOT_USERNAME.lower() in message.text.lower()) or 
+        (message.text and BOT_USERNAME.lower() in message.text.lower()) or
+        (message.text and "my_support_gemini_bot" in message.text.lower()) or
         (message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID)
     )
 
     if is_triggered:
         clean_request = message.text
-        # Удаляем юзернейм бота из текста запроса (без учета регистра)
+        # Удаление полного юзернейма из текста (без учета регистра)
         if message.text and BOT_USERNAME.lower() in message.text.lower():
             clean_request = re.sub(re.escape(BOT_USERNAME), "", message.text, flags=re.IGNORECASE).strip()
+        # Удаление юзернейма без собачки, если пользователь написал его так
+        if "my_support_gemini_bot" in clean_request.lower():
+            clean_request = re.sub("my_support_gemini_bot", "", clean_request, flags=re.IGNORECASE).strip()
 
         if not clean_request:
             clean_request = message.text
@@ -163,11 +163,11 @@ async def handle_message(message: types.Message):
 
         await send_to_gemini(message, [full_prompt])
 
-# Функция отправки запросов в Google GenAI API с актуальной моделью 3.6
+# Функция отправки запросов в Google GenAI API с доступной моделью gemini-3-flash
 async def send_to_gemini(message: types.Message, contents: list):
     try:
         response = ai_client.models.generate_content(
-            model='gemini-3.6-flash',  # Актуальная рабочая модель
+            model='gemini-3-flash',  # Актуальная рабочая модель поколения Gemini 3
             contents=contents,
             config=TEXT_CONFIG
         )
@@ -175,10 +175,8 @@ async def send_to_gemini(message: types.Message, contents: list):
             await message.reply("🔄 Не удалось получить ответ от модели. Попробуйте снова.")
             return
         
-        # Предварительная очистка от Markdown-звездочек
         raw_text = response.text.replace("**", "").replace("* ", "- ")
         
-        # Безопасная отправка HTML: если разметка сломана ИИ, шлем как чистый текст
         try:
             await message.reply(raw_text, parse_mode=ParseMode.HTML)
         except Exception:
@@ -199,7 +197,6 @@ async def main():
     
     await bot.delete_webhook(drop_pending_updates=True)
     
-    # Запуск веб-сервера aiohttp в фоне, чтобы он не мешал циклу Telegram
     app = web.Application()
     app.router.add_get("/", handle_ping)
     runner = web.AppRunner(app)
@@ -208,8 +205,6 @@ async def main():
     await site.start()
     
     print(f"Бот {BOT_USERNAME} успешно запущен на порту {PORT}!")
-    
-    # Запуск Long Polling
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
