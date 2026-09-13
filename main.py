@@ -22,7 +22,7 @@ try:
 except ValueError:
     ALLOWED_GROUP = 0
 
-# Ваш Telegram ID надежно зафиксирован внутри списка (квадратных скобок)
+# Ваш Telegram ID успешно вшит внутрь списка!
 ALLOWED_USERS = [490524856]  
 
 bot = Bot(token=TOKEN)
@@ -78,7 +78,7 @@ async def generate_image_cmd(message: types.Message):
             pass
         return
 
-    # Нативное и полностью безопасное извлечение строки промпта средствами самого aiogram
+    # Нативное и на 100% безопасное извлечение промпта (это ГАРАНТИРОВАННО строка)
     image_prompt = message.get_args()
     if image_prompt:
         image_prompt = image_prompt.strip()
