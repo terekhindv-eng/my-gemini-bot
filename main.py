@@ -39,19 +39,7 @@ chat_history = defaultdict(list)
 BOT_USERNAME = ""
 BOT_ID = 0
 
-@dp.message(CommandStart())
-async def start_cmd(message: types.Message):
-    if message.chat.type == "private" and message.from_user.id != 490524856:
-        await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
-        return
-    if message.chat.type in ["group", "supergroup"] and message.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()):
-        try:
-            await bot.leave_chat(message.chat.id)
-        except Exception:
-            pass
-        return
-    await message.answer("Привет! Я официальный ассистент Gemini. Чем могу помочь?")
-
+# 1. ПРИОРИТЕТНЫЙ ХЭНДЛЕР: Команда генерации изображений
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message):
     current_chat_id = message.chat.id
@@ -60,7 +48,7 @@ async def generate_image_cmd(message: types.Message):
     if message.chat.type in ["group", "supergroup"] and message.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()):
         return
 
-    # Полностью безопасное и чистое извлечение текста промпта без split ошибок
+    # Нативное и безопасное извлечение аргументов команды
     image_prompt = message.get_args()
     if image_prompt:
         image_prompt = image_prompt.strip()
@@ -84,7 +72,7 @@ async def generate_image_cmd(message: types.Message):
         
         image_bytes = None
         if result and result.generated_images:
-            image_bytes = result.generated_images.image.image_bytes
+            image_bytes = result.generated_images[0].image.image_bytes
 
         if not image_bytes:
             await status_msg.edit_text("🔄 Не удалось сгенерировать картинку. Попробуйте другой запрос.")
@@ -96,6 +84,23 @@ async def generate_image_cmd(message: types.Message):
     except Exception as e:
         await status_msg.edit_text(f"❌ Ошибка генерации: {str(e)}")
 
+
+# 2. Хэндлер команды /start
+@dp.message(CommandStart())
+async def start_cmd(message: types.Message):
+    if message.chat.type == "private" and message.from_user.id != 490524856:
+        await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
+        return
+    if message.chat.type in ["group", "supergroup"] and message.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()):
+        try:
+            await bot.leave_chat(message.chat.id)
+        except Exception:
+            pass
+        return
+    await message.answer("Привет! Я официальный ассистент Gemini. Чем могу помочь?")
+
+
+# 3. Хэндлер медиафайлов, документов и аудио
 @dp.message(F.photo | F.document | F.audio | F.voice)
 async def handle_files(message: types.Message):
     global BOT_USERNAME, BOT_ID
@@ -149,6 +154,8 @@ async def handle_files(message: types.Message):
 
     await send_to_gemini(message, [file_part, prompt_text])
 
+
+# 4. Хэндлер обычных текстовых сообщений
 @dp.message(F.text)
 async def handle_message(message: types.Message):
     global BOT_USERNAME, BOT_ID
@@ -179,9 +186,9 @@ async def handle_message(message: types.Message):
 
         await send_to_gemini(message, [full_prompt])
 
+
 async def send_to_gemini(message: types.Message, contents: list):
     try:
-        # Переключаемся на новую актуальную модель gemini-3.6-flash
         response = ai_client.models.generate_content(
             model='gemini-3.6-flash',
             contents=contents,
