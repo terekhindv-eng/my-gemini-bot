@@ -1,4 +1,4 @@
-import os, io, asyncio, re, multiprocessing
+import os, io, asyncio, re, threading, http.server
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.enums import ParseMode
@@ -7,12 +7,12 @@ from google.genai import types as genai_types
 
 TOKEN, GEMINI_KEY, PORT = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("GEMINI_API_KEY"), int(os.getenv("PORT", "10000"))
 bot, dp, ai_client = Bot(token=TOKEN), Dispatcher(), genai.Client(api_key=GEMINI_KEY)
-chat_history, BOT_USERNAME, BOT_ID = asyncio.defaultdict(list), "", 0
+chat_history, BOT_USERNAME, BOT_ID = {}, "", 0
 
-GOOGLE_AI_SYSTEM_INSTRUCTION = "Вы — официальный ИИ-ассистент Gemini от Google. Тебе КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать звездочки (*) или нижние подчеркивания (_) для выделения текста. Если нужно сделать текст ЖИРНЫМ, используй строго теги <b>текст</b>, КУРСИВ — <i>текст</i>."
+GOOGLE_AI_SYSTEM_INSTRUCTION = "Вы — official Google Gemini AI. Запрещено использовать (*) или (_) для выделения текста. Если нужно сделать текст ЖИРНЫМ, используй теги <b>текст</b>, КУРСИВ — <i>текст</i>."
 TEXT_CONFIG = genai_types.GenerateContentConfig(system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION, temperature=0.7)
 DRAW_CONFIG = genai_types.GenerateContentConfig(
-    system_instruction="Ты — генератор графики на Python. Напиши полноценный скрипт с использованием matplotlib или PIL, который визуализирует запрос пользователя и ОБЯЗАТЕЛЬНО сохраняет результат в 'output.png'. Используй продвинутый пиксель-арт или фигуры. Выводи код внутри ```python.",
+    system_instruction="Ты — генератор графики на Python. Напиши полноценный скрипт с использованием matplotlib или PIL, который визуализирует запрос пользователя и сохраняет результат в 'output.png'. Выводи код внутри ```python.",
     tools=[{'code_execution': {}}], temperature=0.3
 )
 
@@ -71,21 +71,17 @@ async def send_to_gemini(message: types.Message, contents: list):
         await message.reply((res.text or "🔄 Пустой ответ.").replace("**", ""), parse_mode=ParseMode.HTML)
     except Exception as e: await message.reply(f"Ошибка API: {str(e)}")
 
-def fake_server():
-    import socket
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(("0.0.0.0", PORT))
-    s.listen(1)
-    while True:
-        try: conn, _ = s.accept(); conn.send(b"HTTP/1.1 200 OK\r\n\r\nBot is live!"); conn.close()
-        except: pass
+def run_http_server():
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"Live")
+    http.server.HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 async def main():
     global BOT_USERNAME, BOT_ID
     info = await bot.get_me()
     BOT_USERNAME, BOT_ID = f"@{info.username}", info.id
     await bot.delete_webhook(drop_pending_updates=True)
-    multiprocessing.Process(target=fake_server, daemon=True).start()
+    threading.Thread(target=run_http_server, daemon=True).start()
     print(f"Бот {BOT_USERNAME} запущен!"); await dp.start_polling(bot)
 
 if __name__ == "__main__": asyncio.run(main())
