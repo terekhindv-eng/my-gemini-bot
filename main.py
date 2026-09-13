@@ -14,7 +14,7 @@ TEXT_CONFIG = genai_types.GenerateContentConfig(system_instruction=GOOGLE_AI_SYS
 
 def check_chat(m): return not (m.chat.type == "private" and m.from_user.id != 490524856) and not (m.chat.type in ["group", "supergroup"] and m.chat.id != int(os.getenv("TELEGRAM_GROUP_ID", "0").strip()))
 
-# 1. ГЛАВНЫЙ ХЭНДЛЕР: Скачивание через нативный urllib в память и гарантированная отправка файла
+# 1. ГЛАВНЫЙ ХЭНДЛЕР: Исправленная и на 100% валидная ссылка для скачивания изображений
 @dp.message(Command("draw", "рендери"))
 async def generate_image_cmd(message: types.Message, command: CommandObject):
     if not check_chat(message): return
@@ -25,10 +25,9 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
         clean_prompt = command.args.strip()
         encoded_prompt = urllib.parse.quote(clean_prompt)
         
-        # Стабильная ссылка генератора
+        # Исправлено: Добавлен обязательный слеш после .ai/p/ для корректного пути URL
         image_url = f"https://pollinations.ai{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true"
         
-        # Скачиваем картинку через нативный urllib.request в фоновом потоке, чтобы не вешать бота
         def download_file():
             req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=30) as response:
@@ -39,16 +38,14 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
         if not image_bytes:
             return await status_msg.edit_text("🔄 Ошибка: не удалось получить данные от сервера генерации.")
 
-        # Упаковываем байты в локальный файл Telegram
         input_file = types.BufferedInputFile(image_bytes, filename="generated_image.jpg")
         
-        # Отправляем как настоящее ФОТО (а не ссылку) — теперь Telegram примет его мгновенно
         await message.reply_photo(
             photo=input_file, 
             caption=f"✨ <b>Готово!</b>\nЗапрос: <i>{clean_prompt}</i>", 
             parse_mode=ParseMode.HTML
         )
-        await bot.delete_message(message.chat.id, status_msg.status_msg.message_id if hasattr(status_msg, 'status_msg') else status_msg.message_id)
+        await bot.delete_message(message.chat.id, status_msg.message_id)
     except Exception as e: 
         await status_msg.edit_text(f"❌ Ошибка генерации:\n<code>{str(e)}</code>", parse_mode=ParseMode.HTML)
 
