@@ -12,11 +12,15 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
 
-# Работаем строго с ОДНОЙ группой
+# 1. Настройка разрешенной группы
 try:
     ALLOWED_GROUP = int(os.getenv("TELEGRAM_GROUP_ID", "0").strip())
 except ValueError:
     ALLOWED_GROUP = 0
+
+# 2. Белый список пользователей для личной переписки (ID через запятую)
+# Пример: [123456789, 987654321] — впишите сюда свои ID
+ALLOWED_USERS = [490524856]
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -31,7 +35,7 @@ GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "или нижних подчеркиваний (_) для выделения текста. Если тебе нужно сделать текст "
     "ЖИРНЫМ, используй строго теги <b>текст</b>. Если нужен КУРСИВ — используй <i>текст</i>. "
     "Для оформления списков используй стандартные маркеры (например, обычный дефис или точку) "
-    "и перенос строки. Пиши в профессиональном, но дружелюбном тоне."
+    "и перенос строки. Пишите в профессиональном, но дружелюбном тоне."
 )
 
 # Передаем системную инструкцию при создании модели
@@ -50,6 +54,12 @@ BOT_ID = 0
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
+    # Если это ЛС и пользователя нет в белом списке — блокируем
+    if message.chat.type == "private" and message.from_user.id not in ALLOWED_USERS:
+        await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
+        return
+
+    # Защита: если команду вызвали в чужой группе
     if message.chat.type in ["group", "supergroup"] and message.chat.id != ALLOWED_GROUP:
         try:
             await message.answer("❌ Этот бот приватный и не может работать в данной группе.")
@@ -66,6 +76,12 @@ async def handle_files(message: types.Message):
     global BOT_USERNAME, BOT_ID
     current_chat_id = message.chat.id
 
+    # Проверка белого списка для файлов в ЛС
+    if message.chat.type == "private" and message.from_user.id not in ALLOWED_USERS:
+        await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
+        return
+
+    # Блок защиты от чужих групп
     if message.chat.type in ["group", "supergroup"] and current_chat_id != ALLOWED_GROUP:
         try:
             await bot.leave_chat(current_chat_id)
@@ -75,6 +91,7 @@ async def handle_files(message: types.Message):
 
     user_text = message.caption if message.caption else ""
     
+    # Запись отправки медиафайла в историю для сохранения контекста (только для групп)
     file_type_label = "[Фотография]" if message.photo else "[Документ]"
     if message.chat.type in ["group", "supergroup"]:
         user_name = message.from_user.full_name or "Пользователь"
@@ -82,6 +99,7 @@ async def handle_files(message: types.Message):
         if len(chat_history) > MAX_HISTORY:
             chat_history.pop(0)
 
+    # Скачивание файла в оперативную память
     file_io = io.BytesIO()
     
     if message.photo:
@@ -105,6 +123,7 @@ async def handle_files(message: types.Message):
         }
     ]
 
+    # Интеграция истории переписки (только если запрос пришел из группы)
     if message.chat.type != "private" and chat_history:
         context = "\n".join(chat_history)
         prompt_text = (
@@ -126,6 +145,12 @@ async def handle_message(message: types.Message):
     global BOT_USERNAME, BOT_ID
     current_chat_id = message.chat.id
 
+    # Проверка белого списка для текста в ЛС
+    if message.chat.type == "private" and message.from_user.id not in ALLOWED_USERS:
+        await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
+        return
+
+    # Блок защиты от чужих групп
     if message.chat.type in ["group", "supergroup"] and current_chat_id != ALLOWED_GROUP:
         try:
             await bot.leave_chat(current_chat_id)
@@ -133,18 +158,21 @@ async def handle_message(message: types.Message):
             pass
         return
 
+    # Записываем текущее сообщение в историю (только для групп)
     if message.chat.type in ["group", "supergroup"] and message.text:
         user_name = message.from_user.full_name or "Пользователь"
         chat_history.append(f"{user_name}: {message.text}")
         if len(chat_history) > MAX_HISTORY:
             chat_history.pop(0)
 
-    if message.chat.type == "private" or current_chat_id == ALLOWED_GROUP:
+    # Бот реагирует, если это разрешенный пользователь в ЛС ИЛИ если это наша группа
+    if (message.chat.type == "private" and message.from_user.id in ALLOWED_USERS) or current_chat_id == ALLOWED_GROUP:
         
         clean_request = message.text.replace(BOT_USERNAME, "").strip() if message.text else ""
         if not clean_request:
             clean_request = message.text
 
+        # Передаем историю чата только для групповых бесед, чтобы личный чат не смешивался с группой
         if message.chat.type != "private" and chat_history:
             context = "\n".join(chat_history)
             full_prompt = (
@@ -174,8 +202,6 @@ async def send_to_gemini(message: types.Message, contents: list):
                 return
 
             raw_text = response.text
-            
-            # На всякий случай заменяем сырые маркеры Markdown, если ИИ проигнорирует инструкцию
             raw_text = raw_text.replace("**", "")
 
             # Отправляем ответ, используя безопасный режим HTML
