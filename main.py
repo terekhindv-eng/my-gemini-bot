@@ -18,8 +18,8 @@ try:
 except ValueError:
     ALLOWED_GROUP = 0
 
-# 2. Белый список пользователей для личной переписки (Ваш полученный ID)
-ALLOWED_USERS = [123456789] # Замените 123456789 на ваш реальный числовой ID
+# 2. Белый список пользователей для личной переписки (Ваш ID)
+ALLOWED_USERS = # Сюда автоматически подставится ваш рабочий ID из репозитория
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -43,9 +43,9 @@ model = genai.GenerativeModel(
     system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION
 )
 
-# Локальное хранилище истории для нашей группы
+# Локальное хранилище истории, разделенное по ID тем (топиков)
 MAX_HISTORY = 40
-chat_history = []
+chat_history = defaultdict(list)
 
 # Глобальные переменные данных бота
 BOT_USERNAME = ""
@@ -53,12 +53,10 @@ BOT_ID = 0
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
-    # Если это ЛС и пользователя нет в белом списке — блокируем
     if message.chat.type == "private" and message.from_user.id not in ALLOWED_USERS:
         await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
         return
 
-    # Защита: если команду вызвали в чужой группе
     if message.chat.type in ["group", "supergroup"] and message.chat.id != ALLOWED_GROUP:
         try:
             await message.answer("❌ Этот бот приватный и не может работать в данной группе.")
@@ -75,12 +73,10 @@ async def handle_files(message: types.Message):
     global BOT_USERNAME, BOT_ID
     current_chat_id = message.chat.id
 
-    # Проверка белого списка для медиафайлов в ЛС
     if message.chat.type == "private" and message.from_user.id not in ALLOWED_USERS:
         await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
         return
 
-    # Блок защиты от чужих групп
     if message.chat.type in ["group", "supergroup"] and current_chat_id != ALLOWED_GROUP:
         try:
             await bot.leave_chat(current_chat_id)
@@ -91,14 +87,16 @@ async def handle_files(message: types.Message):
     user_text = message.caption if message.caption else ""
     file_io = io.BytesIO()
     
-    # Автоматическое определение типов файлов и соответствующих им кодеков для Gemini API
+    # Определяем ID текущей темы (если сообщение в основном чате/общем потоке, ID будет 0)
+    thread_id = message.message_thread_id or 0
+    
     if message.photo:
         file_info = message.photo[-1]
         mime_type = "image/jpeg"
         file_label = "[Фотография]"
     elif message.voice:
         file_info = message.voice
-        mime_type = "audio/ogg" # Внутренний формат голосовых Telegram
+        mime_type = "audio/ogg"
         file_label = "[Голосовое сообщение]"
     elif message.audio:
         file_info = message.audio
@@ -109,22 +107,20 @@ async def handle_files(message: types.Message):
         mime_type = message.document.mime_type or "application/octet-stream"
         file_label = "[Документ]"
 
-    # Запись события в историю (только для групп)
+    # Запись события в историю конкретной темы
     if message.chat.type in ["group", "supergroup"]:
         user_name = message.from_user.full_name or "Пользователь"
-        chat_history.append(f"{user_name}: {file_label} {user_text}")
-        if len(chat_history) > MAX_HISTORY:
-            chat_history.pop(0)
+        chat_history[thread_id].append(f"{user_name}: {file_label} {user_text}")
+        if len(chat_history[thread_id]) > MAX_HISTORY:
+            chat_history[thread_id].pop(0)
 
     try:
-        # Скачиваем медиафайл напрямую в память сервера
         await bot.download(file_info, destination=file_io)
         file_bytes = file_io.getvalue()
     except Exception as e:
         await message.reply(f"❌ Не удалось загрузить файл: {str(e)}")
         return
 
-    # Подготовка мультимодального контента для передачи в Google SDK
     contents = [
         {
             "mime_type": mime_type,
@@ -132,17 +128,16 @@ async def handle_files(message: types.Message):
         }
     ]
 
-    # Сборка контекста для группового чата
-    if message.chat.type != "private" and chat_history:
-        context = "\n".join(chat_history)
+    # Сборка контекста из истории текущей темы
+    if message.chat.type != "private" and chat_history[thread_id]:
+        context = "\n".join(chat_history[thread_id])
         prompt_text = (
-            f"Перед тобой история последних сообщений из рабочего чата:\n"
+            f"Перед тобой история последних сообщений из этой темы рабочего чата:\n"
             f"\"\"\"\n{context}\n\"\"\"\n\n"
             f"Пользователь прикрепил медиафайл ({file_label}) и оставил запрос: {user_text}\n"
-            f"Проанализируй прикрепленный файл, опираясь на контекст беседы."
+            f"Проанализируй прикрепленный файл, опираясь на контекст беседы текущей темы."
         )
     else:
-        # Если в ЛС файл прислан без текста, просим Gemini сделать общий анализ
         prompt_text = user_text if user_text else "Проанализируй содержимое этого медиафайла и детально опиши/расшифруй его."
 
     contents.append(prompt_text)
@@ -155,12 +150,10 @@ async def handle_message(message: types.Message):
     global BOT_USERNAME, BOT_ID
     current_chat_id = message.chat.id
 
-    # Проверка белого списка для текста в ЛС
     if message.chat.type == "private" and message.from_user.id not in ALLOWED_USERS:
         await message.answer("❌ Общение с ботом в личных сообщениях запрещено. Бот работает только в рабочей группе.")
         return
 
-    # Блок защиты от чужих групп
     if message.chat.type in ["group", "supergroup"] and current_chat_id != ALLOWED_GROUP:
         try:
             await bot.leave_chat(current_chat_id)
@@ -168,24 +161,28 @@ async def handle_message(message: types.Message):
             pass
         return
 
-    # Записываем текущее сообщение в историю (только для групп)
+    # Определяем ID текущей темы
+    thread_id = message.message_thread_id or 0
+
+    # Записываем текущее сообщение в историю конкретной темы
     if message.chat.type in ["group", "supergroup"] and message.text:
         user_name = message.from_user.full_name or "Пользователь"
-        chat_history.append(f"{user_name}: {message.text}")
-        if len(chat_history) > MAX_HISTORY:
-            chat_history.pop(0)
+        chat_history[thread_id].append(f"{user_name}: {message.text}")
+        if len(chat_history[thread_id]) > MAX_HISTORY:
+            chat_history[thread_id].pop(0)
 
-    # Реакция на текст в ЛС (для админа) или в разрешенной группе
+    # Реакция на текст
     if (message.chat.type == "private" and message.from_user.id in ALLOWED_USERS) or current_chat_id == ALLOWED_GROUP:
         
         clean_request = message.text.replace(BOT_USERNAME, "").strip() if message.text else ""
         if not clean_request:
             clean_request = message.text
 
-        if message.chat.type != "private" and chat_history:
-            context = "\n".join(chat_history)
+        # Передаем историю переписки только для групповых топиков
+        if message.chat.type != "private" and chat_history[thread_id]:
+            context = "\n".join(chat_history[thread_id])
             full_prompt = (
-                f"Перед тобой история последних сообщений из рабочего чата:\n"
+                f"Перед тобой история последних сообщений из этой темы рабочего чата:\n"
                 f"\"\"\"\n{context}\n\"\"\"\n\n"
                 f"Выполни запрос пользователя, опираясь на эту историю чата: {clean_request}"
             )
@@ -249,4 +246,4 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run=main() # Запуск polling-сервера
