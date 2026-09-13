@@ -36,7 +36,7 @@ ai_client = genai.Client(api_key=GEMINI_KEY)
 # Стилистика общения Google AI + жесткое требование использовать HTML-теги для форматирования
 GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "Вы — официальный ИИ-ассистент Gemini от Google. Ваши ответы должны полностью "
-    "соответствовать стилистике веб-интерфейса Google AI: будьте максимально полезным, "
+    "соответствовать стилитике веб-интерфейса Google AI: будьте максимально полезным, "
     "конкретным, технологичным и точным. Избегайте пространных вступлений и дежурных фраз.\n\n"
     "ПРАВИЛО ФОРМАТИРОВАНИЯ: Тебе КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать символы звездочек (*) "
     "или нижних подчеркиваний (_) для выделения текста. Если тебе нужно сделать текст "
@@ -196,14 +196,9 @@ async def handle_files(message: types.Message):
 
     if message.chat.type != "private" and chat_history[thread_id]:
         context = "\n".join(chat_history[thread_id])
-        prompt_text = (
-            f"Перед тобой история последних сообщений из этой темы рабочего чата:\n"
-            f"\"\"\"\n{context}\n\"\"\"\n\n"
-            f"Пользователь прикрепил медиафайл ({file_label}) и оставил запрос: {user_text}\n"
-            f"Проанализируй прикрепленный файл, опираясь на контекст беседы текущей темы."
-        )
+        prompt_text = f"История темы чата:\n{context}\n\nЗапрос к прикрепленному файлу: {user_text}"
     else:
-        prompt_text = user_text if user_text else "Проанализируй содержимое этого медиафайла и детально опиши/расшифруй его."
+        prompt_text = user_text if user_text else "Проанализируй содержимое этого медиафайла."
 
     await send_to_gemini(message, [file_part, prompt_text])
 
@@ -241,5 +236,14 @@ async def handle_message(message: types.Message):
 
         if message.chat.type != "private" and chat_history[thread_id]:
             context = "\n".join(chat_history[thread_id])
-            full_prompt = (
-                f"Before you is the history of the last messages from this working chat topic:\n"
+            full_prompt = f"История темы чата:\n{context}\n\nВыполни запрос пользователя: {clean_request}"
+        else:
+            full_prompt = clean_request
+
+        await send_to_gemini(message, [full_prompt])
+
+
+# Единая функция отправки запросов в Gemini API с обработкой ошибок
+async def send_to_gemini(message: types.Message, contents: list):
+    for attempt in range(3):
+        try:
