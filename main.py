@@ -5,7 +5,8 @@ from collections import defaultdict
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
 from aiogram.enums import ParseMode
-import google.generativeai as genai
+from google import genai
+from google.genai import types as genai_types
 from aiohttp import web
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -19,16 +20,18 @@ except ValueError:
     ALLOWED_GROUP = 0
 
 # 2. Белый список пользователей для личной переписки
-ALLOWED_USERS = []  # Обязательно вставьте ваш числовой Telegram ID внутрь скобок!
+ALLOWED_USERS = []  # Обязательно укажите ваш числовой ID внутри скобок!
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
-genai.configure(api_key=GEMINI_KEY)
+
+# Инициализируем новый официальный клиент Gemini
+ai_client = genai.Client(api_key=GEMINI_KEY)
 
 # Стилистика общения Google AI + жесткое требование использовать HTML-теги для форматирования
 GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "Вы — официальный ИИ-ассистент Gemini от Google. Ваши ответы должны полностью "
-    "соответствовать стилитике веб-интерфейса Google AI: будьте максимально полезным, "
+    "соответствовать стилистике веб-интерфейса Google AI: будьте максимально полезным, "
     "конкретным, технологичным и точным. Избегайте пространных вступлений и дежурных фраз.\n\n"
     "ПРАВИЛО ФОРМАТИРОВАНИЯ: Тебе КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать символы звездочек (*) "
     "или нижних подчеркиваний (_) для выделения текста. Если тебе нужно сделать текст "
@@ -37,10 +40,10 @@ GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "и перенос строки. Пишите в профессиональном, но дружелюбном тоне."
 )
 
-# Передаем системную инструкцию при создании текстовой модели
-model = genai.GenerativeModel(
-    "gemini-3.6-flash",
-    system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION
+# Настройка конфигурации для текстовой модели
+TEXT_CONFIG = genai_types.GenerateContentConfig(
+    system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION,
+    temperature=0.7
 )
 
 # Локальное хранилище истории, разделенное по ID тем (топиков). Установлен лимит в 50 сообщений.
@@ -84,7 +87,7 @@ async def generate_image_cmd(message: types.Message):
             pass
         return
 
-    image_prompt = message.text.split(maxsplit=1)[1].strip() if len(message.text.split()) > 1 else ""
+    image_prompt = message.text.split(maxsplit=1).strip() if len(message.text.split()) > 1 else ""
 
     if not image_prompt:
         await message.reply("❌ <b>Вы не ввели описание для картинки!</b>\nПример использования:\n<code>/draw милый рыжий кот в очках космического скафандра</code>", parse_mode=ParseMode.HTML)
@@ -94,20 +97,20 @@ async def generate_image_cmd(message: types.Message):
 
     for attempt in range(3):
         try:
-            imagen_model = genai.GenerativeModel("imagen-3.0-generate-002")
-            result = imagen_model.generate_content(
-                f"Generate a high-quality, detailed image based on this description: {image_prompt}",
-                generation_config=genai.types.GenerationConfig(
-                    response_modalities=["image"]
+            # Генерация картинок через новый клиент на модели Imagen 3
+            result = ai_client.models.generate_images(
+                model='imagen-3.0-generate-002',
+                prompt=image_prompt,
+                config=genai_types.GenerateImagesConfig(
+                    number_of_images=1,
+                    output_mime_type="image/jpeg",
+                    aspect_ratio="1:1"
                 )
             )
 
             image_bytes = None
-            for candidate in result.candidates:
-                for part in candidate.content.parts:
-                    if part.inline_data:
-                        image_bytes = part.inline_data.data
-                        break
+            if result.generated_images:
+                image_bytes = result.generated_images[0].image.image_bytes
 
             if not image_bytes:
                 await status_msg.edit_text("🔄 Извините, не удалось извлечь изображение из ответа ИИ. Попробуйте изменить формулировку промпта.")
@@ -182,12 +185,11 @@ async def handle_files(message: types.Message):
         await message.reply(f"❌ Не удалось загрузить файл: {str(e)}")
         return
 
-    contents = [
-        {
-            "mime_type": mime_type,
-            "data": file_bytes
-        }
-    ]
+    # Структурируем файл под новый формат данных google-genai
+    file_part = genai_types.Part.from_bytes(
+        data=file_bytes,
+        mime_type=mime_type,
+    )
 
     if message.chat.type != "private" and chat_history[thread_id]:
         context = "\n".join(chat_history[thread_id])
@@ -200,8 +202,7 @@ async def handle_files(message: types.Message):
     else:
         prompt_text = user_text if user_text else "Проанализируй содержимое этого медиафайла и детально опиши/расшифруй его."
 
-    contents.append(prompt_text)
-    await send_to_gemini(message, contents)
+    await send_to_gemini(message, [file_part, prompt_text])
 
 
 # Обработчик обычных текстовых сообщений
@@ -242,5 +243,3 @@ async def handle_message(message: types.Message):
                 f"\"\"\"\n{context}\n\"\"\"\n\n"
                 f"Fulfill the user's request based on this chat history: {clean_request}"
             )
-        else:
-            full_prompt = clean_request
