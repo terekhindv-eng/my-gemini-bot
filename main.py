@@ -1,4 +1,4 @@
-import os, io, asyncio, re, threading, http.server
+import os, io, asyncio, re, threading, http.server, glob
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.enums import ParseMode
@@ -12,7 +12,7 @@ chat_history, BOT_USERNAME, BOT_ID = {}, "", 0
 GOOGLE_AI_SYSTEM_INSTRUCTION = "Вы — official Google Gemini AI. Запрещено использовать (*) или (_) для выделения текста. Если нужно сделать текст ЖИРНЫМ, используй теги <b>текст</b>, КУРСИВ — <i>текст</i>."
 TEXT_CONFIG = genai_types.GenerateContentConfig(system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION, temperature=0.7)
 DRAW_CONFIG = genai_types.GenerateContentConfig(
-    system_instruction="Ты — генератор графики на Python. Напиши полноценный скрипт с использованием matplotlib или PIL, который визуализирует запрос пользователя и сохраняет результат в 'output.png'. Выводи код внутри ```python.",
+    system_instruction="Ты — генератор графики на Python. Напиши полноценный скрипт с использованием matplotlib или PIL, который визуализирует запрос пользователя и сохраняет результат в файл 'output.png'. Выводи код внутри стандартного блока ```python.",
     tools=[{'code_execution': {}}], temperature=0.3
 )
 
@@ -32,15 +32,24 @@ async def generate_image_cmd(message: types.Message, command: CommandObject):
         if not img_bytes and res.text:
             cb = re.search(r"```python(.*?)```", res.text, re.DOTALL)
             script = cb.group(1).strip() if cb else res.text
-            if any(x in script for x in ["output.png", "plt", "Image"]):
+            if any(x in script for x in ["png", "plt", "Image", "save"]):
                 try:
+                    # Чистим старые картинки перед запуском, чтобы не отправить прошлый результат
+                    for old_img in glob.glob("*.png"):
+                        try: os.remove(old_img)
+                        except: pass
+                    
                     loc = {}
                     exec(script, {}, loc)
-                    if os.path.exists("output.png"):
-                        with open("output.png", "rb") as f: img_bytes = f.read()
-                        os.remove("output.png")
+                    
+                    # Поиск ЛЮБОГО сгенерированного PNG-файла в папке проекта
+                    png_files = glob.glob("*.png")
+                    if png_files:
+                        target_file = png_files[0]
+                        with open(target_file, "rb") as f: img_bytes = f.read()
+                        os.remove(target_file)
                 except Exception: pass
-        if not img_bytes: return await status_msg.edit_text(f"🤖 <b>Ответ модели:</b>\n{res.text or 'Ошибка.'}")
+        if not img_bytes: return await status_msg.edit_text(f"🤖 <b>Ответ модели:</b>\n{res.text or 'Ошибка рендеринга.'}")
         await bot.delete_message(message.chat.id, status_msg.message_id)
         await message.reply_photo(photo=types.BufferedInputFile(img_bytes, filename="img.png"), caption=f"✨ Готово! Рендер: <i>{command.args.strip()}</i>", parse_mode=ParseMode.HTML)
     except Exception as e: await status_msg.edit_text(f"❌ Ошибка: {str(e)}")
