@@ -5,7 +5,6 @@ from collections import defaultdict
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
 from aiogram.enums import ParseMode
-from aiogram.webhook.aiohttp_impl import SimpleRequestHandler, setup_application
 from google import genai
 from google.genai import types as genai_types
 from aiohttp import web
@@ -13,9 +12,6 @@ from aiohttp import web
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
-
-WEBHOOK_HOST = "https://onrender.com"
-WEBHOOK_PATH = f"/webhook/{TOKEN}"
 
 try:
     ALLOWED_GROUP = int(os.getenv("TELEGRAM_GROUP_ID", "0").strip())
@@ -28,7 +24,7 @@ ai_client = genai.Client(api_key=GEMINI_KEY)
 
 GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "Вы — официальный ИИ-ассистент Gemini от Google. Ваши ответы должны полностью "
-    "соответствовать стилистике веб-интерфейса Google AI: будьте максимально полезным, "
+    "соответствовать стилитике веб-интерфейса Google AI: будьте максимально полезным, "
     "конкретным, технологичным и точным. Избегайте пространных вступлений и дежурных фраз.\n\n"
     "ПРАВИЛО ФОРМАТИРОВАНИЯ: Тебе КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать символы звездочек (*) "
     "или нижних подчеркиваний (_) для выделения текста. Если тебе нужно сделать текст "
@@ -75,7 +71,7 @@ async def generate_image_cmd(message: types.Message):
             pass
         return
 
-    # Полностью безопасное извлечение строки промпта средствами самого aiogram
+    # Извлечение промпта (обрабатывается строго как текст)
     image_prompt = message.get_args()
     if image_prompt:
         image_prompt = image_prompt.strip()
@@ -222,22 +218,29 @@ async def send_to_gemini(message: types.Message, contents: list):
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
-async def on_startup(app):
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    print(f"Веб-сервер пинга успешно запущен на порту {PORT}")
+
+async def main():
     global BOT_USERNAME, BOT_ID
     bot_info = await bot.get_me()
     BOT_USERNAME = f"@{bot_info.username}"
     BOT_ID = bot_info.id
-    await bot.set_webhook(f"{WEBHOOK_HOST}{WEBHOOK_PATH}")
-    print(f"Вебхук успешно установлен!")
-
-def main():
-    app = web.Application()
-    app.router.add_get("/", handle_ping)
-    handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
-    handler.register(app, path=WEBHOOK_PATH)
-    app.on_startup.append(on_startup)
-    setup_application(app, dp, bot=bot)
-    web.run_app(app, host="0.0.0.0", port=PORT)
+    
+    # Сбрасываем старые вебхуки, чтобы активировать поллинг
+    await bot.delete_webhook(drop_pending_updates=True)
+    
+    # Запускаем легкий веб-сервер для прохождения проверок портов Render.com
+    await start_web_server()
+    
+    print(f"Бот {BOT_USERNAME} успешно запущен!")
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
