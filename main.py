@@ -35,12 +35,11 @@ GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "и перенос строки. Пишите в профессиональном, но дружелюбном тоне."
 )
 
-# Оптимизировано под требования актуальной линейки Gemini 3.6
 TEXT_CONFIG = genai_types.GenerateContentConfig(
     system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION
 )
 
-# Оптимизированное хранилище контекста (защита памяти от переполнения на Render)
+# Оптимизированное хранилище контекста
 MAX_HISTORY = 50
 chat_history = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
 
@@ -61,7 +60,7 @@ def check_chat(message: types.Message) -> bool:
         return False
     return True
 
-# Настройка при старте бота (получаем имя и ID бота автоматически)
+# Настройка при старте бота
 @dp.startup()
 async def on_startup(bot: Bot):
     global BOT_USERNAME, BOT_ID
@@ -171,12 +170,11 @@ async def handle_message(message: types.Message):
 
         await send_to_gemini(message, [full_prompt])
 
-# Функция отправки запросов в Google GenAI API
+# Функция отправки запросов в Google GenAI API с автоматическим разбиением текста
 async def send_to_gemini(message: types.Message, contents: list):
     try:
         await bot.send_chat_action(chat_id=message.chat.id, action="typing")
         
-        # Переключение на актуальную бесплатную модель
         response = ai_client.models.generate_content(
             model="gemini-3.6-flash", 
             contents=contents,
@@ -184,7 +182,28 @@ async def send_to_gemini(message: types.Message, contents: list):
         )
         
         if response.text:
-            await message.reply(response.text, parse_mode=ParseMode.HTML)
+            text = response.text
+            # Если текст укладывается в рамки лимита Telegram, отправляем целиком
+            if len(text) <= 4000:
+                await message.reply(text, parse_mode=ParseMode.HTML)
+            else:
+                # Нарезаем текст на части по границам переноса строк
+                chunks = []
+                while len(text) > 4000:
+                    # Ищем перенос строки ближе к концу допустимого лимита
+                    split_idx = text.rfind('\n', 0, 4000)
+                    # Если переноса нет, режем принудительно на 4000 символах
+                    if split_idx == -1:
+                        split_idx = 4000
+                    chunks.append(text[:split_idx])
+                    text = text[split_idx:]
+                chunks.append(text)
+                
+                # Поочередно отправляем все части пользователю
+                for chunk in chunks:
+                    if chunk.strip():
+                        await message.reply(chunk, parse_mode=ParseMode.HTML)
+                        await asyncio.sleep(0.5) # Пауза против спам-фильтра Telegram
         else:
             await message.reply("⚠️ Бот вернул пустой ответ.")
             
