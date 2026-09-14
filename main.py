@@ -10,11 +10,16 @@ from aiogram.utils.markdown import html_decoration as hd
 from google import genai
 from google.genai import types as genai_types
 from aiohttp import web
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 # Загрузка конфигурации из Environment Variables на Render
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
+# URL вашего приложения на Render (например, https://onrender.com). 
+# Добавьте эту переменную в настройки (Environment Variables) на Render.com
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL") 
+
 ADMIN_ID = 490524856  # Ваш подтвержденный ID администратора для ЛС
 
 bot = Bot(token=TOKEN)
@@ -59,6 +64,19 @@ def check_chat(message: types.Message) -> bool:
     if message.chat.type in ["group", "supergroup"] and message.chat.id != allowed_group_id:
         return False
     return True
+
+# Настройка при старте бота (получаем имя и ID бота автоматически)
+@dp.startup()
+async def on_startup(bot: Bot):
+    global BOT_USERNAME, BOT_ID
+    bot_user = await bot.get_me()
+    BOT_USERNAME = bot_user.username
+    BOT_ID = bot_user.id
+    
+    # Автоматически устанавливаем вебхук при запуске на Render
+    if RENDER_EXTERNAL_URL:
+        webhook_url = f"{RENDER_EXTERNAL_URL.rstrip('/')}/webhook"
+        await bot.set_webhook(webhook_url)
 
 # 1. ХЭНДЛЕР /start
 @dp.message(CommandStart())
@@ -106,13 +124,8 @@ async def handle_files(message: types.Message):
         user_name = message.from_user.full_name or "Пользователь"
         chat_history[thread_id].append(f"{user_name}: {file_label} {user_text}")
 
-    # Файлы обрабатываем только если они присланы в ЛС или содержат упоминание бота в подписи
-    is_triggered = (
-        message.chat.type == "private" or 
-        (user_text and BOT_USERNAME.lower() in user_text.lower()) or
-        (user_text and "my_support_gemini_bot" in user_text.lower()) or
-        (message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID)
-    )
+    # Бот реагирует на любое сообщение в разрешенном чате
+    is_triggered = True
 
     if is_triggered:
         try:
@@ -145,17 +158,12 @@ async def handle_message(message: types.Message):
         user_name = message.from_user.full_name or "Пользователь"
         chat_history[thread_id].append(f"{user_name}: {message.text}")
 
-    # Бот реагирует в ЛС всегда, а в группе — только на упоминание или ответ (Reply)
-    is_triggered = (
-        message.chat.type == "private" or 
-        (message.text and BOT_USERNAME.lower() in message.text.lower()) or
-        (message.text and "my_support_gemini_bot" in message.text.lower()) or
-        (message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID)
-    )
+    # Бот реагирует на любое сообщение в разрешенном чате
+    is_triggered = True
 
     if is_triggered:
         clean_request = message.text
-        # Очищаем текст от имени бота, если оно было указано
+        # Очищаем текст от имени бота, если оно было случайно указано
         if message.text and BOT_USERNAME.lower() in message.text.lower():
             clean_request = re.sub(re.escape(BOT_USERNAME), "", message.text, flags=re.IGNORECASE).strip()
         if "my_support_gemini_bot" in clean_request.lower():
@@ -172,50 +180,42 @@ async def handle_message(message: types.Message):
 
         await send_to_gemini(message, [full_prompt])
 
-# Функция отправки запросов в Google GenAI API с моделью gemini-3.1-flash-lite
+# Функция отправки запросов в Google GenAI API с моделью gemini
 async def send_to_gemini(message: types.Message, contents: list):
     try:
+        await bot.send_chat_action(chat_id=message.chat.id, action="typing")
+        
+        # Название вашей ИИ модели (оно не менялось)
         response = ai_client.models.generate_content(
-            model='gemini-3.1-flash-lite',  # Актуальная стабильная модель
+            model="gemini-2.5-flash", 
             contents=contents,
             config=TEXT_CONFIG
         )
-        if not response.text:
-            await message.reply("🔄 Не удалось получить ответ от модели. Попробуйте снова.")
-            return
         
-        raw_text = response.text.replace("**", "").replace("* ", "- ")
-        
-        try:
-            await message.reply(raw_text, parse_mode=ParseMode.HTML)
-        except Exception:
-            await message.reply(hd.quote(raw_text), parse_mode=ParseMode.HTML)
+        if response.text:
+            await message.reply(response.text, parse_mode=ParseMode.HTML)
+        else:
+            await message.reply("⚠️ Бот вернул пустой ответ.")
             
     except Exception as e:
-        await message.reply(f"Ошибка Gemini API: {str(e)}")
+        await message.reply(f"❌ Ошибка при обращении к Gemini API: {str(e)}")
 
-# Веб-интерфейс для прохождения проверок портов Render (и пинга от cron-job)
-async def handle_ping(request):
-    return web.Response(text="Bot is running!")
-
-# ИСПРАВЛЕННЫЙ И ЗАКРЫТЫЙ СИНТАКСИЧЕСКИ ФИНАЛ ПРОГРАММЫ:
-async def main():
-    global BOT_USERNAME, BOT_ID
-    bot_info = await bot.get_me()
-    BOT_USERNAME = f"@{bot_info.username}"
-    BOT_ID = bot_info.id
-    
-    await bot.delete_webhook(drop_pending_updates=True)
-    
+# --- ФИНАЛЬНАЯ ЧАСТЬ: ЗАПУСК ВЕБ-СЕРВЕРА ДЛЯ RENDER.COM ---
+def main():
     app = web.Application()
-    app.router.add_get("/", handle_ping)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", PORT)
-    await site.start()
     
-    print(f"Бот {BOT_USERNAME} успешно запущен на порту {PORT}!")
-    await dp.start_polling(bot, drop_pending_updates=True)
+    # Настраиваем обработчик входящих уведомлений от Telegram по адресу /webhook
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot
+    )
+    webhook_requests_handler.register(app, path="/webhook")
+    
+    # Связываем aiogram и aiohttp приложение
+    setup_application(app, dp, bot=bot)
+    
+    # Запускаем сервер на порту, который выделил Render
+    web.run_app(app, host="0.0.0.0", port=PORT)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
