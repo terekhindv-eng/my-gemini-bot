@@ -176,7 +176,7 @@ async def send_to_gemini(message: types.Message, contents: list):
         await bot.send_chat_action(chat_id=message.chat.id, action="typing")
         
         response = ai_client.models.generate_content(
-            model="gemini-3.6-flash", 
+            model="gemini-3.1-flash-lite", 
             contents=contents,
             config=TEXT_CONFIG
         )
