@@ -16,8 +16,6 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
-# URL вашего приложения на Render (например, https://onrender.com). 
-# Добавьте эту переменную в настройки (Environment Variables) на Render.com
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL") 
 
 ADMIN_ID = 490524856  # Ваш подтвержденный ID администратора для ЛС
@@ -37,9 +35,9 @@ GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "и перенос строки. Пишите в профессиональном, но дружелюбном тоне."
 )
 
+# Оптимизировано под требования актуальной линейки Gemini 3.6
 TEXT_CONFIG = genai_types.GenerateContentConfig(
-    system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION,
-    temperature=0.7
+    system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION
 )
 
 # Оптимизированное хранилище контекста (защита памяти от переполнения на Render)
@@ -51,11 +49,9 @@ BOT_ID = 0
 
 # Функция строгой проверки доступа к чатам и личке
 def check_chat(message: types.Message) -> bool:
-    # 1. Проверка личных сообщений (строго для ADMIN_ID)
     if message.chat.type == "private" and message.from_user.id != ADMIN_ID:
         return False
     
-    # 2. Проверка группы (только для разрешенного TELEGRAM_GROUP_ID)
     try:
         allowed_group_id = int(os.getenv("TELEGRAM_GROUP_ID", "0").strip())
     except ValueError:
@@ -73,7 +69,6 @@ async def on_startup(bot: Bot):
     BOT_USERNAME = bot_user.username
     BOT_ID = bot_user.id
     
-    # Автоматически устанавливаем вебхук при запуске на Render
     if RENDER_EXTERNAL_URL:
         webhook_url = f"{RENDER_EXTERNAL_URL.rstrip('/')}/webhook"
         await bot.set_webhook(webhook_url)
@@ -119,12 +114,10 @@ async def handle_files(message: types.Message):
         mime_type = message.document.mime_type or "application/octet-stream"
         file_label = "[Документ]"
 
-    # Сохраняем сообщение в историю для поддержания контекста темы
     if message.chat.type in ["group", "supergroup"]:
         user_name = message.from_user.full_name or "Пользователь"
         chat_history[thread_id].append(f"{user_name}: {file_label} {user_text}")
 
-    # Бот реагирует на любое сообщение в разрешенном чате
     is_triggered = True
 
     if is_triggered:
@@ -158,12 +151,10 @@ async def handle_message(message: types.Message):
         user_name = message.from_user.full_name or "Пользователь"
         chat_history[thread_id].append(f"{user_name}: {message.text}")
 
-    # Бот реагирует на любое сообщение в разрешенном чате
     is_triggered = True
 
     if is_triggered:
         clean_request = message.text
-        # Очищаем текст от имени бота, если оно было случайно указано
         if message.text and BOT_USERNAME.lower() in message.text.lower():
             clean_request = re.sub(re.escape(BOT_USERNAME), "", message.text, flags=re.IGNORECASE).strip()
         if "my_support_gemini_bot" in clean_request.lower():
@@ -180,14 +171,14 @@ async def handle_message(message: types.Message):
 
         await send_to_gemini(message, [full_prompt])
 
-# Функция отправки запросов в Google GenAI API с моделью gemini
+# Функция отправки запросов в Google GenAI API
 async def send_to_gemini(message: types.Message, contents: list):
     try:
         await bot.send_chat_action(chat_id=message.chat.id, action="typing")
         
-        # Название вашей ИИ модели (оно не менялось)
+        # Переключение на актуальную бесплатную модель
         response = ai_client.models.generate_content(
-            model="gemini-2.5-flash", 
+            model="gemini-3.6-flash", 
             contents=contents,
             config=TEXT_CONFIG
         )
@@ -200,21 +191,12 @@ async def send_to_gemini(message: types.Message, contents: list):
     except Exception as e:
         await message.reply(f"❌ Ошибка при обращении к Gemini API: {str(e)}")
 
-# --- ФИНАЛЬНАЯ ЧАСТЬ: ЗАПУСК ВЕБ-СЕРВЕРА ДЛЯ RENDER.COM ---
+# --- ЗАПУСК ВЕБ-СЕРВЕРА ДЛЯ RENDER.COM ---
 def main():
     app = web.Application()
-    
-    # Настраиваем обработчик входящих уведомлений от Telegram по адресу /webhook
-    webhook_requests_handler = SimpleRequestHandler(
-        dispatcher=dp,
-        bot=bot
-    )
+    webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     webhook_requests_handler.register(app, path="/webhook")
-    
-    # Связываем aiogram и aiohttp приложение
     setup_application(app, dp, bot=bot)
-    
-    # Запускаем сервер на порту, который выделил Render
     web.run_app(app, host="0.0.0.0", port=PORT)
 
 if __name__ == "__main__":
