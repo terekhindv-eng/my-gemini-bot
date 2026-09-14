@@ -210,11 +210,19 @@ async def send_to_gemini(message: types.Message, contents: list):
     except Exception as e:
         await message.reply(f"❌ Ошибка при обращении к Gemini API: {str(e)}")
 
+# --- ДОБАВЛЕННЫЙ ЭНДПОИНТ ДЛЯ ОТВЕТА НА КРОН-ПИНГИ ---
+async def health_check(request):
+    return web.Response(text="Бот активен", status=200)
+
 # --- ЗАПУСК ВЕБ-СЕРВЕРА ДЛЯ RENDER.COM ---
 def main():
     app = web.Application()
     webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     webhook_requests_handler.register(app, path="/webhook")
+    
+    # Регистрация корневого пути для удержания сервера от засыпания
+    app.router.add_get("/", health_check)
+    
     setup_application(app, dp, bot=bot)
     web.run_app(app, host="0.0.0.0", port=PORT)
 
