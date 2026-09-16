@@ -35,10 +35,9 @@ GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "и перенос строки. Пишите в профессиональном, но дружелюбном тоне."
 )
 
-# Оптимизированная конфигурация: добавлен лимит токенов для стабильности cron-job.org
 TEXT_CONFIG = genai_types.GenerateContentConfig(
     system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION,
-    max_output_tokens=2000  # Ограничение ~6000-8000 символов (максимум 2 чанка для Telegram)
+    max_output_tokens=2000  # Жесткое ограничение длины ответа от Gemini (~6000-8000 символов)
 )
 
 # Оптимизированное хранилище контекста
@@ -173,7 +172,7 @@ async def handle_message(message: types.Message):
         await send_to_gemini(message, [full_prompt])
 
 
-# Внутренняя фоновая асинхронная задача: берет на себя все общение с Gemini и отправку чанков в Telegram
+# Внутренняя фоновая асинхронная задача: берет на себя все долгое общение с Gemini и отправку чанков
 async def _background_gemini_task(message: types.Message, contents: list):
     try:
         await bot.send_chat_action(chat_id=message.chat.id, action="typing")
@@ -197,9 +196,7 @@ async def _background_gemini_task(message: types.Message, contents: list):
                 # Нарезаем текст на части по границам переноса строк
                 chunks = []
                 while len(text) > 4000:
-                    # Ищем перенос строки ближе к концу допустимого лимита
                     split_idx = text.rfind('\n', 0, 4000)
-                    # Если переноса нет или он ушел слишком далеко вверх, режем принудительно
                     if split_idx == -1 or split_idx < 3000:
                         split_idx = 4000
                     chunks.append(text[:split_idx])
@@ -245,3 +242,7 @@ def main():
     app.router.add_get("/", health_check)
     
     setup_application(app, dp, bot=bot)
+    web.run_app(app, host="0.0.0.0", port=PORT)
+
+# Прямой вызов функции инициализации сервера без условий __main__
+main()
