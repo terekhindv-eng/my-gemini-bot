@@ -35,7 +35,7 @@ GOOGLE_AI_SYSTEM_INSTRUCTION = (
     "и перенос строки. Пишите в профессиональном, но дружелюбном тоне."
 )
 
-# Оптимизированная конфигурация: добавлен лимит токенов для предотвращения перегрузки
+# Оптимизированная конфигурация: добавлен лимит токенов для стабильности cron-job.org
 TEXT_CONFIG = genai_types.GenerateContentConfig(
     system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION,
     max_output_tokens=2000  # Ограничение ~6000-8000 символов (максимум 2 чанка для Telegram)
@@ -173,7 +173,7 @@ async def handle_message(message: types.Message):
         await send_to_gemini(message, [full_prompt])
 
 
-# Внутренняя фоновая задача: берет на себя все долгое общение с Gemini и отправку в чат
+# Внутренняя фоновая асинхронная задача: берет на себя все общение с Gemini и отправку чанков в Telegram
 async def _background_gemini_task(message: types.Message, contents: list):
     try:
         await bot.send_chat_action(chat_id=message.chat.id, action="typing")
@@ -191,14 +191,15 @@ async def _background_gemini_task(message: types.Message, contents: list):
                 try:
                     await message.reply(text, parse_mode=ParseMode.HTML)
                 except Exception:
-                    # Если Telegram ругается на некорректный HTML, экранируем его
+                    # Резервный вариант на случай некорректной HTML-разметки от нейросети
                     await message.reply(hd.quote(text), parse_mode=None)
             else:
                 # Нарезаем текст на части по границам переноса строк
                 chunks = []
                 while len(text) > 4000:
+                    # Ищем перенос строки ближе к концу допустимого лимита
                     split_idx = text.rfind('\n', 0, 4000)
-                    # Если переноса нет или он слишком далеко, режем принудительно на 4000 символах
+                    # Если переноса нет или он ушел слишком далеко вверх, режем принудительно
                     if split_idx == -1 or split_idx < 3000:
                         split_idx = 4000
                     chunks.append(text[:split_idx])
@@ -211,19 +212,36 @@ async def _background_gemini_task(message: types.Message, contents: list):
                         try:
                             await message.reply(chunk, parse_mode=ParseMode.HTML)
                         except Exception:
-                            # Защита от сломанных тегов при жесткой нарезке
+                            # Экранируем чанк, если внутри него сломались HTML-теги при нарезке
                             await message.reply(hd.quote(chunk), parse_mode=None)
                         await asyncio.sleep(1.0) # Пауза против спам-фильтра Telegram
         else:
             await message.reply("⚠️ Бот вернул пустой ответ.")
+            
     except Exception as e:
         try:
-            await message.reply(f"❌ Произошла ошибка при обработке запроса: {str(e)}")
+            await message.reply(f"❌ Ошибка при обращении к Gemini API: {str(e)}")
         except Exception:
             pass
 
-# Функция отправки запросов в Google GenAI API. Мгновенно завершает HTTP-запрос от вебхука/крона
+# Функция отправки запросов в Google GenAI API с автоматическим разбиением текста
 async def send_to_gemini(message: types.Message, contents: list):
-    # Асинхронно делегируем тяжелую задачу в фон. 
-    # Функция завершается за 0.001 сек, сервер Render сразу отдает '200 OK' для cron-job.org
+    # Асинхронно делегируем задачу в фоновое выполнение.
+    # Основной поток освобождается мгновенно, возвращая статус 200 для Render и cron-job.org
     asyncio.create_task(_background_gemini_task(message, contents))
+
+
+# --- ДОБАВЛЕННЫЙ ЭНДПОИНТ ДЛЯ ОТВЕТА НА КРОН-ПИНГИ ---
+async def health_check(request):
+    return web.Response(text="Бот активен", status=200)
+
+# --- ЗАПУСК ВЕБ-СЕРВЕРА ДЛЯ RENDER.COM ---
+def main():
+    app = web.Application()
+    webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
+    webhook_requests_handler.register(app, path="/webhook")
+    
+    # Регистрация корневого пути для удержания сервера от засыпания
+    app.router.add_get("/", health_check)
+    
+    setup_application(app, dp, bot=bot)
