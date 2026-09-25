@@ -131,7 +131,8 @@ async def handle_files(message: types.Message):
         file_part = genai_types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
 
         if message.chat.type != "private" and chat_history[thread_id]:
-            context = "\n".join(chat_history[thread_id])
+            context = "
+".join(chat_history[thread_id])
             prompt_text = f"История последних сообщений в этой теме чата:\n{context}\n\nЗапрос к прикрепленному файлу: {user_text}"
         else:
             prompt_text = user_text if user_text else "Проанализируй содержимое этого медиафайла."
@@ -164,7 +165,8 @@ async def handle_message(message: types.Message):
             clean_request = message.text
 
         if message.chat.type != "private" and chat_history[thread_id]:
-            context = "\n".join(chat_history[thread_id])
+            context = "
+".join(chat_history[thread_id])
             full_prompt = f"История последних {MAX_HISTORY} сообщений в этой теме чата:\n{context}\n\nВыполни запрос пользователя: {clean_request}"
         else:
             full_prompt = clean_request
@@ -177,7 +179,9 @@ async def _background_gemini_task(message: types.Message, contents: list):
     try:
         await bot.send_chat_action(chat_id=message.chat.id, action="typing")
         
-        response = ai_client.models.generate_content(
+        # Переведено на полностью асинхронный вызов через модуль .aio, 
+        # чтобы избежать блокирования основного Event Loop при генерации длинного текста
+        response = await ai_client.aio.models.generate_content(
             model="gemini-3.1-flash-lite", 
             contents=contents,
             config=TEXT_CONFIG
