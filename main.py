@@ -131,9 +131,8 @@ async def handle_files(message: types.Message):
         file_part = genai_types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
 
         if message.chat.type != "private" and chat_history[thread_id]:
-            context = "
-".join(chat_history[thread_id])
-            prompt_text = f"История последних сообщений в этой теме чата:\n{context}\n\nЗапрос к прикрепленному файлу: {user_text}"
+            context_str = "\n".join(chat_history[thread_id])
+            prompt_text = f"История последних сообщений в этой теме чата:\n{context_str}\n\nЗапрос к прикрепленному файлу: {user_text}"
         else:
             prompt_text = user_text if user_text else "Проанализируй содержимое этого медиафайла."
 
@@ -165,22 +164,20 @@ async def handle_message(message: types.Message):
             clean_request = message.text
 
         if message.chat.type != "private" and chat_history[thread_id]:
-            context = "
-".join(chat_history[thread_id])
-            full_prompt = f"История последних {MAX_HISTORY} сообщений в этой теме чата:\n{context}\n\nВыполни запрос пользователя: {clean_request}"
+            context_str = "\n".join(chat_history[thread_id])
+            full_prompt = f"История последних {MAX_HISTORY} сообщений в этой теме чата:\n{context_str}\n\nВыполни запрос пользователя: {clean_request}"
         else:
             full_prompt = clean_request
 
         await send_to_gemini(message, [full_prompt])
 
 
-# Внутренняя фоновая асинхронная задача: берет на себя все долгое общение с Gemini и отправку чанков
+# Внутренняя фоновая асинхронная задача
 async def _background_gemini_task(message: types.Message, contents: list):
     try:
         await bot.send_chat_action(chat_id=message.chat.id, action="typing")
         
-        # Переведено на полностью асинхронный вызов через модуль .aio, 
-        # чтобы избежать блокирования основного Event Loop при генерации длинного текста
+        # Асинхронный вызов к Gemini API через модули .aio
         response = await ai_client.aio.models.generate_content(
             model="gemini-3.1-flash-lite", 
             contents=contents,
@@ -189,15 +186,12 @@ async def _background_gemini_task(message: types.Message, contents: list):
         
         if response.text:
             text = response.text
-            # Если текст укладывается в рамки лимита Telegram, отправляем целиком
             if len(text) <= 4000:
                 try:
                     await message.reply(text, parse_mode=ParseMode.HTML)
                 except Exception:
-                    # Резервный вариант на случай некорректной HTML-разметки от нейросети
                     await message.reply(hd.quote(text), parse_mode=None)
             else:
-                # Нарезаем текст на части по границам переноса строк
                 chunks = []
                 while len(text) > 4000:
                     split_idx = text.rfind('\n', 0, 4000)
@@ -207,15 +201,13 @@ async def _background_gemini_task(message: types.Message, contents: list):
                     text = text[split_idx:]
                 chunks.append(text)
                 
-                # Поочередно отправляем все части пользователю
                 for chunk in chunks:
                     if chunk.strip():
                         try:
                             await message.reply(chunk, parse_mode=ParseMode.HTML)
                         except Exception:
-                            # Экранируем чанк, если внутри него сломались HTML-теги при нарезке
                             await message.reply(hd.quote(chunk), parse_mode=None)
-                        await asyncio.sleep(1.0) # Пауза против спам-фильтра Telegram
+                        await asyncio.sleep(1.0)
         else:
             await message.reply("⚠️ Бот вернул пустой ответ.")
             
@@ -227,26 +219,22 @@ async def _background_gemini_task(message: types.Message, contents: list):
 
 # Функция отправки запросов в Google GenAI API с автоматическим разбиением текста
 async def send_to_gemini(message: types.Message, contents: list):
-    # Асинхронно делегируем задачу в фоновое выполнение.
-    # Основной поток освобождается мгновенно, возвращая статус 200 для Render и cron-job.org
     asyncio.create_task(_background_gemini_task(message, contents))
 
 
-# --- ДОБАВЛЕННЫЙ ЭНДПОИНТ ДЛЯ ОТВЕТА НА КРОН-ПИНГИ ---
+# ЭНДПОИНТ ДЛЯ ОТВЕТА НА КРОН-ПИНГИ
 async def health_check(request):
     return web.Response(text="Бот активен", status=200)
 
-# --- ЗАПУСК ВЕБ-СЕРВЕРА ДЛЯ RENDER.COM ---
+# ЗАПУСК ВЕБ-СЕРВЕРА ДЛЯ RENDER.COM
 def main():
     app = web.Application()
     webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     webhook_requests_handler.register(app, path="/webhook")
     
-    # Регистрация корневого пути для удержания сервера от засыпания
     app.router.add_get("/", health_check)
     
     setup_application(app, dp, bot=bot)
     web.run_app(app, host="0.0.0.0", port=PORT)
 
-# Прямой вызов функции инициализации сервера без условий __main__
 main()
