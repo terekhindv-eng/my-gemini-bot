@@ -5,9 +5,10 @@ import re
 import logging
 from collections import defaultdict, deque
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.enums import ParseMode
 from aiogram.utils.markdown import html_decoration as hd
+from aiogram.types import BotCommand, BotCommandScopeDefault
 from google import genai
 from google.genai import types as genai_types
 from aiohttp import web
@@ -43,7 +44,7 @@ TEXT_CONFIG = genai_types.GenerateContentConfig(
     max_output_tokens=1500  
 )
 
-# Храним историю до 50 сообщений. Ключ — это кортеж (chat_id, thread_id) для абсолютной точности
+# Храним историю до 50 сообщений. Ключ — это кортеж (chat_id, thread_id)
 MAX_HISTORY = 50
 chat_history = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
 
@@ -61,7 +62,6 @@ def check_chat(message: types.Message) -> bool:
         return False
     return True
 
-# Получение уникального ключа для словаря истории
 def get_history_key(message: types.Message):
     chat_id = message.chat.id
     thread_id = message.message_thread_id or 0
@@ -73,6 +73,15 @@ async def on_startup(bot: Bot):
     bot_user = await bot.get_me()
     BOT_USERNAME = bot_user.username
     BOT_ID = bot_user.id
+    
+    # Автоматическая настройка кнопки «Menu» в Telegram
+    commands = [
+        BotCommand(command="start", description="Перезапустить бота"),
+        BotCommand(command="clear", description="Очистить память контекста")
+    ]
+    await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
+    logging.info("Кнопки меню команд успешно зарегистрированы в Telegram!")
+
     if RENDER_EXTERNAL_URL:
         webhook_url = f"{RENDER_EXTERNAL_URL.rstrip('/')}/webhook"
         await bot.set_webhook(webhook_url)
@@ -89,7 +98,15 @@ async def start_cmd(message: types.Message):
     chat_history[key].clear()
     await message.answer("Привет! Контекст нашей беседы полностью очищен. Я готов к общению и буду помнить до 50 сообщений!")
 
-# 2. МУЛЬТИМОДАЛЬНЫЙ ХЭНДЛЕР
+@dp.message(Command("clear"))
+async def clear_cmd(message: types.Message):
+    if not check_chat(message):
+        return
+    key = get_history_key(message)
+    chat_history[key].clear()
+    logging.info(f"Контекст для чата {key} был принудительно очищен пользователем.")
+    await message.reply("🧹 <b>Память контекста успешно очищена!</b> Начнем новый диалог с чистого листа.")
+# 2. МУЛЬТИМОДАЛЬНЫЙ ХЭНДЛЕР (Файлы и медиа)
 @dp.message(F.photo | F.video | F.document | F.audio | F.voice)
 async def handle_files(message: types.Message):
     if not check_chat(message): 
@@ -157,9 +174,8 @@ async def handle_message(message: types.Message):
     user_content = genai_types.Content(role="user", parts=[genai_types.Part.from_text(text=clean_request)])
     await send_to_gemini(message, user_content, user_content, key)
 
-# Внутренняя фоновая асинхронная задача
+# Внутренняя фоновая асинхронная задача для отправки в Gemini
 async def _background_gemini_task(message: types.Message, current_user_content: genai_types.Content, history_user_content: genai_types.Content, key: tuple):
-    # Загружаем накопленную историю для этого конкретного чата
     history_list = list(chat_history[key])
     full_contents = history_list + [current_user_content]
     
@@ -193,7 +209,6 @@ async def _background_gemini_task(message: types.Message, current_user_content: 
     if response and response.text:
         text = response.text
         
-        # Сохраняем шаг диалога в память
         chat_history[key].append(history_user_content)
         ai_content = genai_types.Content(role="model", parts=[genai_types.Part.from_text(text=text)])
         chat_history[key].append(ai_content)
