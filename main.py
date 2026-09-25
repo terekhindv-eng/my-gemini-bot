@@ -125,7 +125,7 @@ async def handle_files(message: types.Message):
             await bot.download(file_info, destination=file_io)
             file_bytes = file_io.getvalue()
         except Exception as e:
-            await message.reply(f"❌ Не удалось загрузить медиафайл: {str(e)}")
+            await message.reply(f"❌ Не удалось加载 медиафайл: {str(e)}")
             return
 
         file_part = genai_types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
@@ -174,46 +174,65 @@ async def handle_message(message: types.Message):
 
 # Внутренняя фоновая асинхронная задача
 async def _background_gemini_task(message: types.Message, contents: list):
-    try:
-        await bot.send_chat_action(chat_id=message.chat.id, action="typing")
-        
-        # Асинхронный вызов к Gemini API через модули .aio
-        response = await ai_client.aio.models.generate_content(
-            model="gemini-3.1-flash-lite", 
-            contents=contents,
-            config=TEXT_CONFIG
-        )
-        
-        if response.text:
-            text = response.text
-            if len(text) <= 4000:
-                try:
-                    await message.reply(text, parse_mode=ParseMode.HTML)
-                except Exception:
-                    await message.reply(hd.quote(text), parse_mode=None)
-            else:
-                chunks = []
-                while len(text) > 4000:
-                    split_idx = text.rfind('\n', 0, 4000)
-                    if split_idx == -1 or split_idx < 3000:
-                        split_idx = 4000
-                    chunks.append(text[:split_idx])
-                    text = text[split_idx:]
-                chunks.append(text)
-                
-                for chunk in chunks:
-                    if chunk.strip():
-                        try:
-                            await message.reply(chunk, parse_mode=ParseMode.HTML)
-                        except Exception:
-                            await message.reply(hd.quote(chunk), parse_mode=None)
-                        await asyncio.sleep(1.0)
-        else:
-            await message.reply("⚠️ Бот вернул пустой ответ.")
-            
-    except Exception as e:
+    response = None
+    max_retries = 4
+    delay = 2
+
+    # Умный цикл повторных попыток при перегрузках (ошибки 503 / 429)
+    for attempt in range(max_retries):
         try:
-            await message.reply(f"❌ Ошибка при обращении к Gemini API: {str(e)}")
+            await bot.send_chat_action(chat_id=message.chat.id, action="typing")
+            
+            response = await ai_client.aio.models.generate_content(
+                model="gemini-3.1-flash-lite", 
+                contents=contents,
+                config=TEXT_CONFIG
+            )
+            break # Успешно получили ответ — выходим из цикла попыток
+            
+        except Exception as e:
+            err_msg = str(e)
+            # Если это ошибка доступности или лимитов, ждем и пробуем еще раз
+            if "503" in err_msg or "429" in err_msg or "UNAVAILABLE" in err_msg:
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(delay)
+                    delay *= 2  # Увеличиваем паузу (2с, 4с, 8с)
+                    continue
+            
+            # Если попытки исчерпаны или ошибка критическая, выводим её
+            try:
+                await message.reply(f"❌ Ошибка при обращении к Gemini API: {err_msg}")
+            except Exception:
+                pass
+            return
+
+    if response and response.text:
+        text = response.text
+        if len(text) <= 4000:
+            try:
+                await message.reply(text, parse_mode=ParseMode.HTML)
+            except Exception:
+                await message.reply(hd.quote(text), parse_mode=None)
+        else:
+            chunks = []
+            while len(text) > 4000:
+                split_idx = text.rfind('\n', 0, 4000)
+                if split_idx == -1 or split_idx < 3000:
+                    split_idx = 4000
+                chunks.append(text[:split_idx])
+                text = text[split_idx:]
+            chunks.append(text)
+            
+            for chunk in chunks:
+                if chunk.strip():
+                    try:
+                        await message.reply(chunk, parse_mode=ParseMode.HTML)
+                    except Exception:
+                        await message.reply(hd.quote(chunk), parse_mode=None)
+                    await asyncio.sleep(1.0)
+    else:
+        try:
+            await message.reply("⚠️ Бот вернул пустой ответ или сервер не ответил после повторных попыток.")
         except Exception:
             pass
 
