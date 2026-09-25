@@ -2,6 +2,7 @@ import os
 import io
 import asyncio
 import re
+import logging
 from collections import defaultdict, deque
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
@@ -12,13 +13,15 @@ from google.genai import types as genai_types
 from aiohttp import web
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
-# Загрузка конфигурации из Environment Variables на Render
+# Включаем логирование, чтобы видеть состояние памяти в консоли Render
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL") 
 
-ADMIN_ID = 490524856  # Ваш подтвержденный ID администратора для ЛС
+ADMIN_ID = 490524856  
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -37,43 +40,44 @@ GOOGLE_AI_SYSTEM_INSTRUCTION = (
 
 TEXT_CONFIG = genai_types.GenerateContentConfig(
     system_instruction=GOOGLE_AI_SYSTEM_INSTRUCTION,
-    max_output_tokens=2000  # Жесткое ограничение длины ответа от Gemini (~6000-8000 символов)
+    max_output_tokens=1500  
 )
 
-# Оптимизированное хранилище контекста
+# Храним историю до 50 сообщений. Ключ — это кортеж (chat_id, thread_id) для абсолютной точности
 MAX_HISTORY = 50
 chat_history = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
 
 BOT_USERNAME = ""
 BOT_ID = 0
 
-# Функция строгой проверки доступа к чатам и личке
 def check_chat(message: types.Message) -> bool:
     if message.chat.type == "private" and message.from_user.id != ADMIN_ID:
         return False
-    
     try:
         allowed_group_id = int(os.getenv("TELEGRAM_GROUP_ID", "0").strip())
     except ValueError:
         allowed_group_id = 0
-
     if message.chat.type in ["group", "supergroup"] and message.chat.id != allowed_group_id:
         return False
     return True
 
-# Настройка при старте бота
+# Получение уникального ключа для словаря истории
+def get_history_key(message: types.Message):
+    chat_id = message.chat.id
+    thread_id = message.message_thread_id or 0
+    return (chat_id, thread_id)
+
 @dp.startup()
 async def on_startup(bot: Bot):
     global BOT_USERNAME, BOT_ID
     bot_user = await bot.get_me()
     BOT_USERNAME = bot_user.username
     BOT_ID = bot_user.id
-    
     if RENDER_EXTERNAL_URL:
         webhook_url = f"{RENDER_EXTERNAL_URL.rstrip('/')}/webhook"
         await bot.set_webhook(webhook_url)
+    logging.info(f"Бот @{BOT_USERNAME} успешно запущен!")
 
-# 1. ХЭНДЛЕР /start
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
     if not check_chat(message):
@@ -81,9 +85,11 @@ async def start_cmd(message: types.Message):
             try: await bot.leave_chat(message.chat.id)
             except Exception: pass
         return
-    await message.answer("Привет! Я официальный мультимодальный ассистент Gemini. Я умею анализировать текст, фото, видео, аудио файлы и помнить контекст беседы.")
+    key = get_history_key(message)
+    chat_history[key].clear()
+    await message.answer("Привет! Контекст нашей беседы полностью очищен. Я готов к общению и буду помнить до 50 сообщений!")
 
-# 2. МУЛЬТИМОДАЛЬНЫЙ ХЭНДЛЕР (Фото, видео, аудио, документы)
+# 2. МУЛЬТИМОДАЛЬНЫЙ ХЭНДЛЕР
 @dp.message(F.photo | F.video | F.document | F.audio | F.voice)
 async def handle_files(message: types.Message):
     if not check_chat(message): 
@@ -91,52 +97,44 @@ async def handle_files(message: types.Message):
 
     user_text = message.caption if message.caption else ""
     file_io = io.BytesIO()
-    thread_id = message.message_thread_id or 0
+    key = get_history_key(message)
     
     if message.photo:
         file_info = message.photo[-1]
         mime_type = "image/jpeg"
-        file_label = "[Фотография]"
+        file_label = "[Фото]"
     elif message.video:
         file_info = message.video
         mime_type = message.video.mime_type or "video/mp4"
-        file_label = "[Видеофайл]"
+        file_label = "[Видео]"
     elif message.voice:
         file_info = message.voice
         mime_type = "audio/ogg"
-        file_label = "[Голосовое сообщение]"
+        file_label = "[Голосовое]"
     elif message.audio:
         file_info = message.audio
         mime_type = message.audio.mime_type or "audio/mp3"
-        file_label = "[Аудиофайл]"
+        file_label = "[Аудио]"
     else:
         file_info = message.document
         mime_type = message.document.mime_type or "application/octet-stream"
         file_label = "[Документ]"
 
-    if message.chat.type in ["group", "supergroup"]:
-        user_name = message.from_user.full_name or "Пользователь"
-        chat_history[thread_id].append(f"{user_name}: {file_label} {user_text}")
+    try:
+        await bot.download(file_info, destination=file_io)
+        file_bytes = file_io.getvalue()
+    except Exception as e:
+        await message.reply(f"❌ Не удалось загрузить медиафайл: {str(e)}")
+        return
 
-    is_triggered = True
+    file_part = genai_types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
+    text_part = genai_types.Part.from_text(text=user_text if user_text else f"Проанализируй этот файл {file_label}.")
+    user_content = genai_types.Content(role="user", parts=[file_part, text_part])
 
-    if is_triggered:
-        try:
-            await bot.download(file_info, destination=file_io)
-            file_bytes = file_io.getvalue()
-        except Exception as e:
-            await message.reply(f"❌ Не удалось加载 медиафайл: {str(e)}")
-            return
+    history_text = f"{file_label}: {user_text}".strip()
+    history_user_content = genai_types.Content(role="user", parts=[genai_types.Part.from_text(text=history_text)])
 
-        file_part = genai_types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
-
-        if message.chat.type != "private" and chat_history[thread_id]:
-            context_str = "\n".join(chat_history[thread_id])
-            prompt_text = f"История последних сообщений в этой теме чата:\n{context_str}\n\nЗапрос к прикрепленному файлу: {user_text}"
-        else:
-            prompt_text = user_text if user_text else "Проанализируй содержимое этого медиафайла."
-
-        await send_to_gemini(message, [file_part, prompt_text])
+    await send_to_gemini(message, user_content, history_user_content, key)
 
 # 3. ТЕКСТОВЫЙ ХЭНДЛЕР
 @dp.message(F.text)
@@ -145,69 +143,63 @@ async def handle_message(message: types.Message):
     if not check_chat(message): 
         return
 
-    thread_id = message.message_thread_id or 0
+    key = get_history_key(message)
+    clean_request = message.text
 
-    if message.chat.type in ["group", "supergroup"] and message.text:
-        user_name = message.from_user.full_name or "Пользователь"
-        chat_history[thread_id].append(f"{user_name}: {message.text}")
+    if BOT_USERNAME.lower() in clean_request.lower():
+        clean_request = re.sub(re.escape(BOT_USERNAME), "", clean_request, flags=re.IGNORECASE).strip()
+    if "my_support_gemini_bot" in clean_request.lower():
+        clean_request = re.sub("my_support_gemini_bot", "", clean_request, flags=re.IGNORECASE).strip()
 
-    is_triggered = True
-
-    if is_triggered:
+    if not clean_request:
         clean_request = message.text
-        if message.text and BOT_USERNAME.lower() in message.text.lower():
-            clean_request = re.sub(re.escape(BOT_USERNAME), "", message.text, flags=re.IGNORECASE).strip()
-        if "my_support_gemini_bot" in clean_request.lower():
-            clean_request = re.sub("my_support_gemini_bot", "", clean_request, flags=re.IGNORECASE).strip()
 
-        if not clean_request:
-            clean_request = message.text
-
-        if message.chat.type != "private" and chat_history[thread_id]:
-            context_str = "\n".join(chat_history[thread_id])
-            full_prompt = f"История последних {MAX_HISTORY} сообщений в этой теме чата:\n{context_str}\n\nВыполни запрос пользователя: {clean_request}"
-        else:
-            full_prompt = clean_request
-
-        await send_to_gemini(message, [full_prompt])
-
+    user_content = genai_types.Content(role="user", parts=[genai_types.Part.from_text(text=clean_request)])
+    await send_to_gemini(message, user_content, user_content, key)
 
 # Внутренняя фоновая асинхронная задача
-async def _background_gemini_task(message: types.Message, contents: list):
+async def _background_gemini_task(message: types.Message, current_user_content: genai_types.Content, history_user_content: genai_types.Content, key: tuple):
+    # Загружаем накопленную историю для этого конкретного чата
+    history_list = list(chat_history[key])
+    full_contents = history_list + [current_user_content]
+    
+    logging.info(f"Чат {key}: отправка запроса. Сообщений в истории до этого: {len(history_list)}")
+    
     response = None
     max_retries = 4
     delay = 2
 
-    # Умный цикл повторных попыток при перегрузках (ошибки 503 / 429)
     for attempt in range(max_retries):
         try:
             await bot.send_chat_action(chat_id=message.chat.id, action="typing")
-            
             response = await ai_client.aio.models.generate_content(
                 model="gemini-3.1-flash-lite", 
-                contents=contents,
+                contents=full_contents,
                 config=TEXT_CONFIG
             )
-            break # Успешно получили ответ — выходим из цикла попыток
-            
+            break
         except Exception as e:
             err_msg = str(e)
-            # Если это ошибка доступности или лимитов, ждем и пробуем еще раз
             if "503" in err_msg or "429" in err_msg or "UNAVAILABLE" in err_msg:
                 if attempt < max_retries - 1:
                     await asyncio.sleep(delay)
-                    delay *= 2  # Увеличиваем паузу (2с, 4с, 8с)
+                    delay *= 2
                     continue
-            
-            # Если попытки исчерпаны или ошибка критическая, выводим её
             try:
                 await message.reply(f"❌ Ошибка при обращении к Gemini API: {err_msg}")
-            except Exception:
-                pass
+            except Exception: pass
             return
 
     if response and response.text:
         text = response.text
+        
+        # Сохраняем шаг диалога в память
+        chat_history[key].append(history_user_content)
+        ai_content = genai_types.Content(role="model", parts=[genai_types.Part.from_text(text=text)])
+        chat_history[key].append(ai_content)
+        
+        logging.info(f"Чат {key}: ответ успешно добавлен. Размер истории теперь: {len(chat_history[key])}")
+
         if len(text) <= 4000:
             try:
                 await message.reply(text, parse_mode=ParseMode.HTML)
@@ -232,27 +224,20 @@ async def _background_gemini_task(message: types.Message, contents: list):
                     await asyncio.sleep(1.0)
     else:
         try:
-            await message.reply("⚠️ Бот вернул пустой ответ или сервер не ответил после повторных попыток.")
-        except Exception:
-            pass
+            await message.reply("⚠️ Бот вернул пустой ответ.")
+        except Exception: pass
 
-# Функция отправки запросов в Google GenAI API с автоматическим разбиением текста
-async def send_to_gemini(message: types.Message, contents: list):
-    asyncio.create_task(_background_gemini_task(message, contents))
+async def send_to_gemini(message: types.Message, current_user_content: genai_types.Content, history_user_content: genai_types.Content, key: tuple):
+    asyncio.create_task(_background_gemini_task(message, current_user_content, history_user_content, key))
 
-
-# ЭНДПОИНТ ДЛЯ ОТВЕТА НА КРОН-ПИНГИ
 async def health_check(request):
     return web.Response(text="Бот активен", status=200)
 
-# ЗАПУСК ВЕБ-СЕРВЕРА ДЛЯ RENDER.COM
 def main():
     app = web.Application()
     webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     webhook_requests_handler.register(app, path="/webhook")
-    
     app.router.add_get("/", health_check)
-    
     setup_application(app, dp, bot=bot)
     web.run_app(app, host="0.0.0.0", port=PORT)
 
