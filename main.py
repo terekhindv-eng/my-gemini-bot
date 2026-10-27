@@ -189,7 +189,7 @@ async def _background_gemini_task(message: types.Message, current_user_content: 
         try:
             await bot.send_chat_action(chat_id=message.chat.id, action="typing")
             response = await ai_client.aio.models.generate_content(
-                model="gemini-1.5-flash-lite", 
+                model="gemini-2.0-flash-lite", 
                 contents=full_contents,
                 config=TEXT_CONFIG
             )
